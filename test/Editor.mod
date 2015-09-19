@@ -3,29 +3,50 @@ MODULE Editor;
 
 IMPORT
 	SYSTEM, Kernel32, User32, Comdlg32;
+	
+CONST
+	FileMenuId = 0;
+	EditMenuId = 1;
+	FontMenuId = 2;
+	
+TYPE
+	BOOL = CARD32;
 
 VAR
-	hInst: Kernel32.HANDLE;
-	hwnd: User32.HANDLE;
+	hInst, hwnd: INTEGER;
 	
-PROCEDURE StdWindowProc(
-	hwnd: User32.HANDLE; uMsg: CARD32; wParam, lParam: INTEGER
-): INTEGER;
-	VAR bRes: User32.BOOL; result: INTEGER;
-BEGIN result := 0;
+PROCEDURE ZeroMemory (VAR buf: ARRAY OF SYSTEM.BYTE);
+	VAR i: INTEGER;
+BEGIN i := 0; WHILE i < LEN(buf) DO buf[i] := 0; INC (i) END
+END ZeroMemory;
+	
+PROCEDURE StdWindowProc (hwnd: INTEGER; uMsg: CARD32; wParam, lParam: INTEGER): INTEGER;
+	VAR bRes: BOOL; result, menuId: INTEGER; callDef: BOOLEAN;
+		cf: Comdlg32.CHOOSEFONTW;
+BEGIN result := 0; callDef := FALSE;
 	IF uMsg = User32.WM_CLOSE THEN
 		bRes := User32.DestroyWindow (hwnd)
 	ELSIF uMsg = User32.WM_DESTROY THEN
 		User32.PostQuitMessage (0)
-	ELSE result := User32.DefWindowProcW (hwnd, uMsg, wParam, lParam)
+	ELSIF uMsg = User32.WM_COMMAND THEN
+		menuId := wParam MOD 10000H;
+		IF menuId = FontMenuId THEN
+			ZeroMemory (cf);
+			cf.lStructSize := SYSTEM.SIZE(Comdlg32.CHOOSEFONTW);
+			bRes := Comdlg32.ChooseFontW (cf)
+		ELSE callDef := TRUE
+		END
+	ELSE callDef := TRUE
+	END;
+	IF callDef THEN
+		result := User32.DefWindowProcW (hwnd, uMsg, wParam, lParam)
 	END;
 	RETURN result
 END StdWindowProc;
 
 PROCEDURE CreateRichEdit;
 	CONST MSFTEDIT_CLASS = 'RICHEDIT50W';
-	VAR hEdit: User32.HANDLE; rect: User32.RECT;
-		bRes: User32.BOOL;
+	VAR hEdit: INTEGER; rect: User32.RECT; bRes: BOOL;
 BEGIN
 	bRes := User32.GetClientRect (hwnd, rect);
 	hEdit := User32.CreateWindowExW(
@@ -38,17 +59,17 @@ BEGIN
 	);
 END CreateRichEdit;
 
-PROCEDURE CreateMenu(): User32.HANDLE;
-	VAR hMenu: User32.HANDLE;
+PROCEDURE CreateMenu(): INTEGER;
+	VAR hMenu: INTEGER;
 		
-	PROCEDURE CreateItem (hMenu: User32.HANDLE; text: ARRAY OF CHAR; pos: INTEGER);
-		VAR mii: User32.MENUITEMINFO; bRes: User32.BOOL;
+	PROCEDURE CreateItem (hMenu: User32.HANDLE; text: ARRAY OF CHAR; id, pos: INTEGER);
+		VAR mii: User32.MENUITEMINFO; bRes: BOOL;
 	BEGIN
 		mii.cbSize := SYSTEM.SIZE(User32.MENUITEMINFO);
 		mii.fMask := ORD(User32.MIIM_STRING + User32.MIIM_ID);
 		mii.fType := 0;
 		mii.fState := 0;
-		mii.wID := pos;
+		mii.wID := id;
 		mii.hSubMenu := 0;
 		mii.hbmpChecked := 0;
 		mii.hbmpUnchecked := 0;
@@ -61,9 +82,9 @@ PROCEDURE CreateMenu(): User32.HANDLE;
 		
 BEGIN (* CreateMenu *)
 	hMenu := User32.CreateMenu();
-	CreateItem (hMenu, 'File', 0);
-	CreateItem (hMenu, 'Edit', 1);
-	CreateItem (hMenu, 'Font', 2);
+	CreateItem (hMenu, 'File', FileMenuId, 0);
+	CreateItem (hMenu, 'Edit', EditMenuId, 1);
+	CreateItem (hMenu, 'Font', FontMenuId, 2);
 	RETURN hMenu
 END CreateMenu;
 	
@@ -72,8 +93,7 @@ PROCEDURE Main;
 		className = 'MainWindow';
 	VAR
 		wclass: User32.WNDCLASSEXW; msg: User32.MSG;
-		res16: CARD16; bRes: User32.BOOL;
-		hDll, hMenu: Kernel32.HANDLE;
+		res16: CARD16; bRes: BOOL; hDll, hMenu: INTEGER;
 BEGIN
 	SYSTEM.LoadLibraryW (hDll, 'Msftedit.dll'); ASSERT (hDll # 0);
 	hInst := Kernel32.GetModuleHandleW(NIL);

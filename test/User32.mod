@@ -8,6 +8,7 @@ CONST
 	WM_CLOSE* = 16;
 	WM_KEYDOWN* = 256;
 	WM_KEYUP* = 257;
+	WM_COMMAND* = 273;
 	
 	(* Window style *)
 	WS_OVERLAPPED* = {};
