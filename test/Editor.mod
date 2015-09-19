@@ -2,7 +2,7 @@ MODULE Editor;
 (*$MAIN*)
 
 IMPORT
-	SYSTEM, Kernel32, User32, Comdlg32;
+	SYSTEM, Kernel32, User32, Gdi32, Comdlg32, Msftedit, Console;
 	
 CONST
 	FileMenuId = 0;
@@ -13,40 +13,74 @@ TYPE
 	BOOL = CARD32;
 
 VAR
-	hInst, hwnd: INTEGER;
+	hInst, hwnd, hEdit: INTEGER;
+	
 	
 PROCEDURE ZeroMemory (VAR buf: ARRAY OF SYSTEM.BYTE);
 	VAR i: INTEGER;
 BEGIN i := 0; WHILE i < LEN(buf) DO buf[i] := 0; INC (i) END
 END ZeroMemory;
+
+PROCEDURE Copy (VAR x, y: ARRAY OF SYSTEM.BYTE);
+	VAR i: INTEGER;
+BEGIN
+	ASSERT (LEN(x) = LEN(y));
+	FOR i := 0 TO LEN(x) - 1 DO y[i] := x[i] END
+END Copy;
+
+PROCEDURE ShowFontDialog;
+	VAR cf: Comdlg32.CHOOSEFONTW; chfmt: Msftedit.CHARFORMATW;
+		lFont: Gdi32.LOGFONTW; msgResult: INTEGER; bRes: BOOL;
+		errCode: CARD32;
+BEGIN
+	chfmt.cbSize := SYSTEM.SIZE(Msftedit.CHARFORMATW);
+	msgResult := User32.SendMessageW(
+		hEdit, Msftedit.EM_GETCHARFORMAT,
+		ORD(Msftedit.SCF_DEFAULT), SYSTEM.ADR(chfmt)
+	);
+	ASSERT (msgResult = chfmt.dwMask);
+	
+	ZeroMemory (lFont);
+	Copy (chfmt.szFaceName, lFont.lfFaceName);
+	lFont.lfPitchAndFamily := chfmt.bPitchAndFamily;
+	lFont.lfHeight := -FLOOR(FLT(chfmt.yHeight) / 15.0);
+	lFont.lfCharSet := chfmt.bCharSet;
+	
+	ZeroMemory (cf);
+	cf.lStructSize := SYSTEM.SIZE(Comdlg32.CHOOSEFONTW);
+	cf.lpLogFont := SYSTEM.ADR(lFont);
+	cf.Flags := ORD(Comdlg32.CF_INITTOLOGFONTSTRUCT);
+	bRes := Comdlg32.ChooseFontW (cf);
+	
+	Copy (lFont.lfFaceName, chfmt.szFaceName);
+	chfmt.bPitchAndFamily := lFont.lfPitchAndFamily;
+	chfmt.yHeight := -lFont.lfHeight * 15;
+	chfmt.bCharSet := lFont.lfCharSet;
+	
+	msgResult := User32.SendMessageW(
+		hEdit, Msftedit.EM_SETCHARFORMAT,
+		ORD(Msftedit.SCF_DEFAULT), SYSTEM.ADR(chfmt)
+	);
+	ASSERT (msgResult # 0);
+END ShowFontDialog;
 	
 PROCEDURE StdWindowProc (hwnd: INTEGER; uMsg: CARD32; wParam, lParam: INTEGER): INTEGER;
-	VAR bRes: BOOL; result, menuId: INTEGER; callDef: BOOLEAN;
-		cf: Comdlg32.CHOOSEFONTW;
-BEGIN result := 0; callDef := FALSE;
-	IF uMsg = User32.WM_CLOSE THEN
-		bRes := User32.DestroyWindow (hwnd)
-	ELSIF uMsg = User32.WM_DESTROY THEN
-		User32.PostQuitMessage (0)
+	VAR bRes: BOOL; result, menuId: INTEGER;
+		
+BEGIN result := 0;
+	IF uMsg = User32.WM_CLOSE THEN bRes := User32.DestroyWindow (hwnd)
+	ELSIF uMsg = User32.WM_DESTROY THEN User32.PostQuitMessage (0)
 	ELSIF uMsg = User32.WM_COMMAND THEN
 		menuId := wParam MOD 10000H;
-		IF menuId = FontMenuId THEN
-			ZeroMemory (cf);
-			cf.lStructSize := SYSTEM.SIZE(Comdlg32.CHOOSEFONTW);
-			bRes := Comdlg32.ChooseFontW (cf)
-		ELSE callDef := TRUE
-		END
-	ELSE callDef := TRUE
-	END;
-	IF callDef THEN
-		result := User32.DefWindowProcW (hwnd, uMsg, wParam, lParam)
+		IF menuId = FontMenuId THEN ShowFontDialog END
+	ELSE result := User32.DefWindowProcW (hwnd, uMsg, wParam, lParam)
 	END;
 	RETURN result
 END StdWindowProc;
 
 PROCEDURE CreateRichEdit;
 	CONST MSFTEDIT_CLASS = 'RICHEDIT50W';
-	VAR hEdit: INTEGER; rect: User32.RECT; bRes: BOOL;
+	VAR rect: User32.RECT; bRes: BOOL;
 BEGIN
 	bRes := User32.GetClientRect (hwnd, rect);
 	hEdit := User32.CreateWindowExW(
@@ -93,9 +127,8 @@ PROCEDURE Main;
 		className = 'MainWindow';
 	VAR
 		wclass: User32.WNDCLASSEXW; msg: User32.MSG;
-		res16: CARD16; bRes: BOOL; hDll, hMenu: INTEGER;
+		res16: CARD16; bRes: BOOL; hMenu: INTEGER;
 BEGIN
-	SYSTEM.LoadLibraryW (hDll, 'Msftedit.dll'); ASSERT (hDll # 0);
 	hInst := Kernel32.GetModuleHandleW(NIL);
 	
 	wclass.cbSize := SYSTEM.SIZE(User32.WNDCLASSEXW);

@@ -139,4 +139,7 @@ PROCEDURE WriteFile*(
 (* Handle and Object functions *)
 PROCEDURE CloseHandle*(hObject: HANDLE): BOOL;
 
+(* Large Integer Functions *)
+PROCEDURE MulDiv* (nNumber, nNumerator, nDenominator: INT32): INT32;
+
 END Kernel32.

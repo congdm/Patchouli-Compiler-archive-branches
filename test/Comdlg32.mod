@@ -1,5 +1,8 @@
 DEFINITION Comdlg32;
 
+CONST
+	CF_INITTOLOGFONTSTRUCT* = {6};
+
 TYPE
 	BOOL* = CARD32;
 	
@@ -24,5 +27,6 @@ TYPE
 	END;
 
 PROCEDURE ChooseFontW* (VAR lpcf: CHOOSEFONTW): BOOL;
+PROCEDURE CommDlgExtendedError*(): CARD32;
 
 END Comdlg32.

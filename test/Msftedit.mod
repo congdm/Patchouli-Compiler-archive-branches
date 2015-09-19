@@ -1,7 +1,16 @@
 DEFINITION Msftedit;
 
 IMPORT
-	Gdi32;
+	User32, Gdi32;
+	
+CONST
+	(* Rich Edit Messages *)
+	EM_GETCHARFORMAT* = User32.WM_USER + 58;
+	EM_SETCHARFORMAT* = User32.WM_USER + 68;
+	
+	(* EM_SETCHARFORMAT wParam masks *)
+	SCF_DEFAULT* = {};
+	SCF_SELECTION* = {0};
 
 TYPE
 	CHARFORMATW* = RECORD

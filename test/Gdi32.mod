@@ -2,6 +2,10 @@ DEFINITION Gdi32;
 
 CONST
 	LF_FACESIZE* = 32;
+	
+	(* Device Parameters for GetDeviceCaps() *)
+	LOGPIXELSX* = 88;
+	LOGPIXELSY* = 90;
 
 TYPE
 	LOGFONTW* = RECORD
@@ -18,7 +22,9 @@ TYPE
 		lfClipPrecision*: BYTE;
 		lfQuality*: BYTE;
 		lfPitchAndFamily*: BYTE;
-		lfFaceName: ARRAY LF_FACESIZE OF CHAR
+		lfFaceName*: ARRAY LF_FACESIZE OF CHAR
 	END;
+	
+PROCEDURE GetDeviceCaps* (hdc: INTEGER; nIndex: INT32): INT32;
 
 END Gdi32.

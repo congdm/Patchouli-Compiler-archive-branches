@@ -9,6 +9,7 @@ CONST
 	WM_KEYDOWN* = 256;
 	WM_KEYUP* = 257;
 	WM_COMMAND* = 273;
+	WM_USER* = 1024;
 	
 	(* Window style *)
 	WS_OVERLAPPED* = {};
@@ -279,6 +280,13 @@ PROCEDURE GetMessageW*(
 PROCEDURE TranslateMessage* (lpMsg: MSG): BOOL;
 PROCEDURE DispatchMessageW* (lpMsg: MSG): BOOL;
 PROCEDURE PostQuitMessage* (nExitCode: INT32);
+
+PROCEDURE SendMessageW*(
+	hWnd: INTEGER;
+	Msg: CARD32;
+	wParam: INTEGER;
+	lParam: INTEGER
+): INTEGER;
 
 (* Dialog Box functions *)
 PROCEDURE MessageBoxW* (
