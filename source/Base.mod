@@ -264,6 +264,29 @@ BEGIN
 	bRes := Kernel32.WriteFile (file.handle, n, 8, byteWritten, NIL)
 END Write_8bytes;
 
+PROCEDURE Write_bytes* (
+	VAR file: FileHandle;
+	VAR buf: ARRAY OF SYSTEM.BYTE;
+	VAR byteWritten: INTEGER
+);
+	VAR bRes: Kernel32.BOOL; bWritten: CARD32;
+BEGIN
+	bRes := Kernel32.WriteFile (file.handle, buf, LEN(buf), bWritten, NIL);
+	byteWritten := bWritten
+END Write_bytes;
+
+PROCEDURE Write_bytes2* (
+	VAR file: FileHandle; bufAdr: INTEGER; VAR byteWritten: INTEGER
+);
+	TYPE ByteArray = ARRAY OF BYTE;
+	VAR bRes: Kernel32.BOOL; bWritten: CARD32;
+BEGIN
+	bRes := Kernel32.WriteFile (
+		file.handle, bufAdr{ByteArray}, byteWritten, bWritten, NIL
+	);
+	byteWritten := bWritten
+END Write_bytes2;
+
 PROCEDURE FilePos* (VAR file: FileHandle): INTEGER;
 	VAR bRes: Kernel32.BOOL; byteToMove, newPointer: Kernel32.LARGE_INTEGER;
 BEGIN byteToMove.QuadPart := 0;

@@ -20,7 +20,7 @@ BEGIN
 		END;
 		Base.Close (srcfile)
 	ELSE
-		Console.WriteString ('AyaCompiler v0.6a for Oberon-07 language');
+		Console.WriteString ('AyaCompiler v0.7a for Oberon-07 language');
 		Console.WriteLn; 
  		Console.WriteString ('Usage: AyaCompile <inputfile>');
 		Console.WriteLn

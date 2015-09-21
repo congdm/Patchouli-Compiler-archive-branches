@@ -489,7 +489,7 @@ BEGIN
 END EmitRep;
 
 PROCEDURE Write_to_file* (from, to: INTEGER);
-	VAR	p, i, k: INTEGER;
+	VAR	org, p, i, k: INTEGER;
 		
 	PROCEDURE Fixup_disp (p, i: INTEGER);
 		VAR disp: CARD32;
@@ -501,14 +501,12 @@ PROCEDURE Write_to_file* (from, to: INTEGER);
 	END Fixup_disp;
 	
 BEGIN (* Write_to_file *)
-	i := metacode[from].ip - ProcState.adr; p := from;
+	org := metacode[from].ip - ProcState.adr; p := from; i := org; k := 0;
 	WHILE p <= to DO
-		IF metacode[p].relfixup THEN Fixup_disp (p, i) END; k := 1;
-		WHILE k <= metacode[p].size DO
-			Base.Write_byte (out, code[i]); INC (i); INC (k)
-		END;
-		INC (p)
-	END
+		IF metacode[p].relfixup THEN Fixup_disp (p, i) END;
+		k := k + metacode[p].size; i := org + k; INC (p)
+	END;
+	Base.Write_bytes2 (out, SYSTEM.ADR(code[org]), k)
 END Write_to_file;
 	
 (* -------------------------------------------------------------------------- *)
