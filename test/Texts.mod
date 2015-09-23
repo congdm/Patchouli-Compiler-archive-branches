@@ -22,11 +22,6 @@ TYPE
 		trailer, pce: Piece
 	END;
 	
-	Reader* = POINTER TO EXTENSIBLE RECORD
-		txt: Text;
-		pos: INTEGER
-	END;
-	
 PROCEDURE NewText* (VAR result: Text);
 	VAR pc, trailer: Piece; txt: Text;
 BEGIN NEW (txt); NEW (txt.buffer); txt.bufOff := 0; txt.len := 0;
@@ -55,10 +50,10 @@ BEGIN trailer := txt.trailer;
 	txt.pce := pc; txt.org := 0; txt.buffer := newBuf; DISPOSE (oldBuf)
 END CleanBuffer;
 
-PROCEDURE RemainingChars (txt: Text): INTEGER;
+PROCEDURE RemainingBuffer (txt: Text): INTEGER;
 BEGIN
 	RETURN BufferSize - txt.bufOff
-END RemainingChars;
+END RemainingBuffer;
 
 PROCEDURE FindPiece (txt: Text; pos: INTEGER; VAR org: INTEGER; VAR result: Piece);
 	VAR p: Piece; porg, d: INTEGER;
@@ -84,35 +79,51 @@ BEGIN
 	END
 END SplitPiece;
 
-PROCEDURE NewReader (VAR result: Reader; txt: Text);
-	VAR rd: Reader;
-BEGIN NEW (rd);
-	rd.txt := txt; rd.pos := 0;
-	result := rd
-END NewReader;
-
-PROCEDURE Read (rd: Reader; VAR out: ARRAY OF CHAR; readAmount: INTEGER; VAR actualRead: INTEGER);
-	VAR txt: Text; pc: Piece; pos, off, cnt, porg, i, k: INTEGER;
-BEGIN txt := rd.txt; pos := rd.pos;
-	IF readAmount > LEN(out) THEN readAmount := LEN(out) END;
-	IF readAmount > txt.len - pos THEN readAmount := txt.len - pos END;
-	IF readAmount > 0 THEN actualRead := readAmount;
-		FindPiece (txt, pos, porg, pc); i := 0;
-		WHILE readAmount > 0 DO off := pos - porg; cnt := pc.len - off;
-			IF cnt > readAmount THEN cnt := readAmount END;
+PROCEDURE Insert* (txt: Text; pos, insertAmount: INTEGER; str: ARRAY OF CHAR);
+	VAR pc, pr, pl: Piece; porg, off, free: INTEGER;
+BEGIN
+	IF insertAmount > LEN(str) THEN insertAmount := LEN(str) END;
+	free := BufferSize - txt.len; IF insertAmount > free THEN insertAmount := free END;
+	IF RemainingBuffer(txt) < insertAmount THEN CleanBuffer (txt) END;
+	IF insertAmount > 0 THEN
+		FindPiece (txt, pos, porg, pc); off := pos - porg;
+		IF pc.off + off < txt.bufOff THEN
+			pl := pc; SplitPiece (pc, off, pr);
+			NEW (pc); pc.off := txt.bufOff; pc.len := 0;
+			pc.prev := pl; pl.next := pc; pc.next := pr; pr.prev := pc
+		ELSIF pc.off + off > txt.bufOff THEN ASSERT(FALSE)
+		END;
+		IF pc.off + off = txt.bufOff THEN
 			SYSTEM.COPY(
-				SYSTEM.ADR(txt.buffer.data[pc.off + off]),
-				SYSTEM.ADR(out[i]),
+				SYSTEM.ADR(str),
+				SYSTEM.ADR(txt.buffer.data[txt.bufOff]),
+				insertAmount
+			);
+			pc.len := pc.len + insertAmount;
+			txt.len := txt.len + insertAmount;
+			txt.bufOff := txt.bufOff + insertAmount
+		ELSE 
+		END
+	ELSIF insertAmount < 0 THEN ASSERT(FALSE)
+	END
+END Insert;
+
+PROCEDURE ReadText* (txt: Text; VAR result: ARRAY OF CHAR; VAR actualRead: INTEGER);
+	VAR trailer, pc: Piece; i, cnt: INTEGER;
+BEGIN trailer := txt.trailer; pc := trailer.next; i := 0;
+	WHILE pc # trailer DO
+		IF i < LEN(result) THEN cnt := LEN(result) - i;
+			IF cnt > pc.len THEN cnt := pc.len END;
+			SYSTEM.COPY(
+				SYSTEM.ADR(txt.buffer.data[pc.off]),
+				SYSTEM.ADR(result[i]),
 				cnt * SYSTEM.SIZE(CHAR)
 			);
-			i := i + cnt; readAmount := readAmount - cnt; pos := pos + cnt;
-			porg := porg + pc.len; pc := pc.next
+			i := i + cnt
 		END;
-		rd.pos := pos;
-		txt.pce := pc.prev; txt.org := porg - txt.pce.len;
-		IF i < LEN(out) THEN out[i] := 0X END
-	ELSE actualRead := 0; out[0] := 0X
-	END
-END Read;
+		pc := pc.next
+	END;
+	actualRead := i
+END ReadText;
 	
 END Texts.
