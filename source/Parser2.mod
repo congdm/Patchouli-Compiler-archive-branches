@@ -547,7 +547,8 @@ BEGIN
 		IF sym = Scanner.rparen THEN Scanner.Get (sym)
 		ELSE FPSection (tp.parblksize, tp.len);
 			WHILE sym = Scanner.semicolon DO Scanner.Get (sym);
-				IF (sym = Scanner.ident) OR (sym = Scanner.var) THEN
+				IF (sym = Scanner.ident) OR (sym = Scanner.var)
+				OR (sym = Scanner.lbrak) THEN
 					FPSection (tp.parblksize, tp.len)
 				ELSE Scanner.Mark (superflousSemicolonError)
 				END

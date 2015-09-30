@@ -4,4 +4,8 @@
 ..\bin\AyaCompile Comdlg32.mod
 ..\bin\AyaCompile Msftedit.mod
 
+..\bin\AyaCompile Texts.mod
+..\bin\AyaCompile TestTexts.mod
+..\bin\AyaCompile TextFrames.mod
+
 ..\bin\AyaCompile Editor.mod

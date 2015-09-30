@@ -1,7 +1,7 @@
 MODULE Texts;
 
 IMPORT
-	SYSTEM;
+	SYSTEM, Console;
 	
 CONST
 	BufferSize = 100000H;
@@ -56,10 +56,10 @@ BEGIN
 END RemainingBuffer;
 
 PROCEDURE FindPiece (txt: Text; pos: INTEGER; VAR org: INTEGER; VAR result: Piece);
-	VAR p: Piece; porg, d: INTEGER;
+	VAR p, trailer: Piece; porg, d: INTEGER;
 BEGIN porg := txt.org; p := txt.pce; d := 0;
-	IF pos >= porg THEN
-		WHILE pos >= porg + p.len DO
+	IF pos >= porg THEN trailer := txt.trailer;
+		WHILE (pos >= porg + p.len) & (p.next # trailer) DO
 			porg := porg + p.len; p := p.next; INC (d)
 		END
 	ELSE REPEAT p := p.prev; porg := porg - p.len; INC (d) UNTIL pos >= porg
@@ -79,7 +79,7 @@ BEGIN
 	END
 END SplitPiece;
 
-PROCEDURE Insert* (txt: Text; pos, insertAmount: INTEGER; str: ARRAY OF CHAR);
+PROCEDURE InsertText* (txt: Text; pos, insertAmount: INTEGER; str: ARRAY OF CHAR);
 	VAR pc, pr, pl: Piece; porg, off, free: INTEGER;
 BEGIN
 	IF insertAmount > LEN(str) THEN insertAmount := LEN(str) END;
@@ -93,20 +93,17 @@ BEGIN
 			pc.prev := pl; pl.next := pc; pc.next := pr; pr.prev := pc
 		ELSIF pc.off + off > txt.bufOff THEN ASSERT(FALSE)
 		END;
-		IF pc.off + off = txt.bufOff THEN
-			SYSTEM.COPY(
-				SYSTEM.ADR(str),
-				SYSTEM.ADR(txt.buffer.data[txt.bufOff]),
-				insertAmount
-			);
-			pc.len := pc.len + insertAmount;
-			txt.len := txt.len + insertAmount;
-			txt.bufOff := txt.bufOff + insertAmount
-		ELSE 
-		END
+		SYSTEM.COPY(
+			SYSTEM.ADR(str),
+			SYSTEM.ADR(txt.buffer.data[txt.bufOff]),
+			insertAmount * SYSTEM.SIZE(CHAR)
+		);
+		pc.len := pc.len + insertAmount;
+		txt.len := txt.len + insertAmount;
+		txt.bufOff := txt.bufOff + insertAmount
 	ELSIF insertAmount < 0 THEN ASSERT(FALSE)
 	END
-END Insert;
+END InsertText;
 
 PROCEDURE ReadText* (txt: Text; VAR result: ARRAY OF CHAR; VAR actualRead: INTEGER);
 	VAR trailer, pc: Piece; i, cnt: INTEGER;
@@ -125,5 +122,9 @@ BEGIN trailer := txt.trailer; pc := trailer.next; i := 0;
 	END;
 	actualRead := i
 END ReadText;
+
+PROCEDURE DeleteLeft* (txt: Text; pos, amount: INTEGER);
+BEGIN
+END DeleteLeft;
 	
 END Texts.

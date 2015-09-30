@@ -1,6 +1,9 @@
 DEFINITION User32;
 
 CONST
+	(* Window Class Styles *)
+	CS_GLOBALCLASS* = {14};
+
 	(* Window message *)
 	WM_NULL* = 0;
 	WM_CREATE* = 1;
@@ -238,7 +241,8 @@ PROCEDURE RegisterClassExW* (lpWndClass: WNDCLASSEXW): CARD16;
 (* Window Functions *)
 PROCEDURE CreateWindowExW*(
 	dwExStyle: CARD32;
-	lpClassName, lpWindowName: ARRAY OF CHAR;
+	lpClassName: ARRAY OF CHAR;
+	[NIL] lpWindowName: ARRAY OF CHAR;
 	dwStyle: CARD32;
 	x, y, nWidth, nHeight: INT32;
 	hWndParent: HANDLE;
@@ -249,7 +253,8 @@ PROCEDURE CreateWindowExW*(
 
 PROCEDURE CreateWindowExA*(
 	dwExStyle: CARD32;
-	lpClassName, lpWindowName: ARRAY OF CHAR8;
+	lpClassName: ARRAY OF CHAR8;
+	[NIL] lpWindowName: ARRAY OF CHAR8;
 	dwStyle: CARD32;
 	x, y, nWidth, nHeight: INT32;
 	hWndParent: HANDLE;
