@@ -8,6 +8,7 @@ CONST
 	WM_NULL* = 0;
 	WM_CREATE* = 1;
 	WM_DESTROY* = 2;
+	WM_PAINT* = 15;
 	WM_CLOSE* = 16;
 	WM_KEYDOWN* = 256;
 	WM_KEYUP* = 257;
@@ -238,6 +239,14 @@ TYPE
 PROCEDURE RegisterClassW* (lpWndClass: WNDCLASSW): CARD16;
 PROCEDURE RegisterClassExW* (lpWndClass: WNDCLASSEXW): CARD16;
 
+PROCEDURE SetWindowLongPtrW*(
+	hWnd: INTEGER;
+	nIndex: INT32;
+	dwNewLong: INTEGER
+): INTEGER;
+
+PROCEDURE GetWindowLongPtrW* (hWnd: INTEGER; nIndex: INT32): INTEGER;
+
 (* Window Functions *)
 PROCEDURE CreateWindowExW*(
 	dwExStyle: CARD32;
@@ -266,6 +275,15 @@ PROCEDURE CreateWindowExA*(
 PROCEDURE ShowWindow* (hWnd: HANDLE; nCmdShow: INT32): BOOL;
 PROCEDURE DestroyWindow* (hWnd: HANDLE): BOOL;
 PROCEDURE GetClientRect* (hWnd: HANDLE; VAR lpRect: RECT): BOOL;
+
+(* Window Property Functions *)
+PROCEDURE SetPropW*(
+	hWnd: INTEGER;
+	lpString: ARRAY OF CHAR;
+	hData: INTEGER
+): BOOL;
+
+PROCEDURE GetPropW* (hWnd: INTEGER; lpString: ARRAY OF CHAR): INTEGER;
 
 (* Window Procedure functions *)
 PROCEDURE DefWindowProcW*(

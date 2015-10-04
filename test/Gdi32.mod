@@ -8,6 +8,8 @@ CONST
 	LOGPIXELSY* = 90;
 
 TYPE
+	BOOL* = CARD32;
+	
 	LOGFONTW* = RECORD
 		lfHeight*: INT32;
 		lfWidth*: INT32;
@@ -26,5 +28,12 @@ TYPE
 	END;
 	
 PROCEDURE GetDeviceCaps* (hdc: INTEGER; nIndex: INT32): INT32;
+
+PROCEDURE TextOutW*(
+	hdc: INTEGER;
+	nXStart, nYStart: INT32;
+	lpString: ARRAY OF CHAR;
+	cchString: INT32
+): BOOL;
 
 END Gdi32.
