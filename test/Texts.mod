@@ -22,6 +22,11 @@ TYPE
 		trailer, pce: Piece
 	END;
 	
+	Reader* = POINTER TO EXTENSIBLE RECORD
+		pos, actualRead*: INT32;
+		txt: Text
+	END;
+	
 PROCEDURE NewText* (VAR result: Text);
 	VAR pc, trailer: Piece; txt: Text;
 BEGIN NEW (txt); NEW (txt.buffer); txt.bufOff := 0; txt.len := 0;
@@ -105,23 +110,49 @@ BEGIN
 	END
 END InsertText;
 
-PROCEDURE ReadText* (txt: Text; VAR result: ARRAY OF CHAR; VAR actualRead: INTEGER);
-	VAR trailer, pc: Piece; i, cnt: INTEGER;
-BEGIN trailer := txt.trailer; pc := trailer.next; i := 0;
-	WHILE pc # trailer DO
-		IF i < LEN(result) THEN cnt := LEN(result) - i;
-			IF cnt > pc.len THEN cnt := pc.len END;
+PROCEDURE NewReader* (VAR rd: Reader; txt: Text);
+BEGIN NEW (rd); rd.pos := 0; rd.txt := txt
+END NewReader;
+
+PROCEDURE Read* (rd: Reader; VAR result: ARRAY OF CHAR; amount: INTEGER);
+	VAR txt: Text; pc: Piece; i, cnt, pos, porg, off: INTEGER;
+BEGIN txt := rd.txt; pos := rd.pos; cnt := txt.len - pos;
+	IF amount > cnt THEN amount := cnt END;
+	IF amount > LEN(result) THEN amount := LEN(result) END;
+	rd.actualRead := amount;
+	IF amount > 0 THEN rd.pos := pos + amount; i := 0;
+		FindPiece (txt, pos, porg, pc); off := pc.off + pos - porg;
+		REPEAT
+			IF pc.len < amount THEN cnt := pc.len ELSE cnt := amount END;
 			SYSTEM.COPY(
-				SYSTEM.ADR(txt.buffer.data[pc.off]),
+				SYSTEM.ADR(txt.buffer.data[off]),
 				SYSTEM.ADR(result[i]),
 				cnt * SYSTEM.SIZE(CHAR)
 			);
-			i := i + cnt
-		END;
-		pc := pc.next
-	END;
-	actualRead := i
-END ReadText;
+			i := i + cnt; pc := pc.next; off := off + cnt
+		UNTIL i = amount
+	END
+END Read;
+
+PROCEDURE ReadLine* (rd: Reader; VAR result: ARRAY OF CHAR);
+	VAR txt: Text; pc: Piece; i, cnt, pos, porg, off: INTEGER;
+BEGIN(* txt := rd.txt; pos := rd.pos; cnt := txt.len - pos;
+	IF amount > cnt THEN amount := cnt END;
+	IF amount > LEN(result) THEN amount := LEN(result) END;
+	rd.actualRead := amount;
+	IF amount > 0 THEN rd.pos := pos + amount; i := 0;
+		FindPiece (txt, pos, porg, pc); off := pc.off + pos - porg;
+		REPEAT
+			IF pc.len < amount THEN cnt := pc.len ELSE cnt := amount END;
+			SYSTEM.COPY(
+				SYSTEM.ADR(txt.buffer.data[off]),
+				SYSTEM.ADR(result[i]),
+				cnt * SYSTEM.SIZE(CHAR)
+			);
+			i := i + cnt; pc := pc.next; off := off + cnt
+		UNTIL i = amount
+	END*)
+END ReadLine;
 
 PROCEDURE DeleteLeft* (txt: Text; pos, amount: INTEGER);
 BEGIN
