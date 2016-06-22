@@ -7,14 +7,16 @@ IMPORT
 	Generator := Generator0;
 
 CONST
-	noSemicolonError* = 'No ;';
-	noColonError* = 'No :';
-	noEqlError* = 'No =';
-	noEndError* = 'No END';
+	noSemicolonError = 'No ;';
+	noColonError = 'No :';
+	noEqlError = 'No =';
+	noEndError = 'No END';
 	
-	notConstError* = 'Not a const';
+	notConstError = 'Not a const';
+	notTypeError = 'Not a type';
+	notIntType = 'Not an integer';
 	
-	superflousCommaError* = 'Superflous ,';
+	superflousCommaError = 'Superflous ,';
 	
 VAR
 	sym*: INTEGER;
@@ -25,6 +27,16 @@ VAR
 PROCEDURE Check*(expected: INTEGER; err: ARRAY OF CHAR);
 BEGIN IF sym = expected THEN Scanner.Get(sym) ELSE Scanner.Mark(err) END
 END Check;
+
+PROCEDURE MakeIntConst(VAR x: Base.Item);
+END MakeIntConst;
+
+PROCEDURE CheckInt*(VAR x: Base.Item);
+BEGIN
+	IF x.type.form # Base.tInt THEN
+		Error(notIntType); x.type := Base.intType
+	END
+END CheckInt;
 
 PROCEDURE NextSym*;
 BEGIN Scanner.Get(sym)
@@ -42,6 +54,20 @@ BEGIN
 END expression;
 
 PROCEDURE type(VAR tp: Base.Type);
+	VAR obj: Base.Object; x: Base.Item;
+BEGIN tp := Base.intType;
+	IF sym = Scanner.ident THEN
+		qualident(obj);
+		IF obj.class = Base.cType THEN tp := obj.type
+		ELSE Error(notTypeError)
+		END
+	ELSIF sym = Scanner.array THEN NextSym;
+		expression(x); CheckInt(x);
+		IF x.mode # Base.cConst THEN Error(notConstError); x.a := 1
+		ELSIF x.a < 1 THEN Error('Invalid array length'); x.a := 1
+		END;
+		
+	END
 END type;
 
 PROCEDURE DeclarationSequence(VAR varsize: INTEGER);
