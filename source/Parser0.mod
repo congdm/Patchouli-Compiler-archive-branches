@@ -16,8 +16,11 @@ CONST
 	notConstError = 'Not a const';
 	notTypeError = 'Not a type';
 	notIntType = 'Not an integer';
+	notFieldList = 'Not a field list';
 	
-	superflousCommaError = 'Superflous ,';
+	superfluousCommaError = 'Superfluous ,';
+	superfluousSemicolonError = 'Superfluous ;';
+	superfluousBarError = 'Superfluous |';
 	
 VAR
 	sym*: INTEGER;
@@ -78,20 +81,56 @@ BEGIN
 			SymTable.New(field, Scanner.id, Base.cField);
 			IF first = Base.guard THEN first := field END;
 			NextSym
-		ELSE Error(superflousCommaError)
+		ELSE Error(superfluousCommaError)
 		END
 	END;
-	Check(Scanner.colon, noColonError);
-	type(fieldType); field := first;
+	Check(Scanner.colon, noColonError); type(fieldType);
 	n := tp.size; n := n - n MOD fieldType.alignment;
 	IF n < tp.size THEN n := n + fieldType.alignment END;
+	IF fieldType.alignment > tp.alignment THEN
+		tp.alignment := fieldType.alignment
+	END;
+	field := first;
 	WHILE obj # Base.guard DO
 		field.type := fieldType;
 		field.lev := SymTable.curLev;
-		field.val := n; n := n + fieldType.size; tp.size := n;
+		field.val := n;
+		n := n + fieldType.size; tp.size := n;
 		field := field.next
 	END;
 END FieldList;
+
+PROCEDURE Union(tp: Base.Type);
+	VAR off, tpAlign, unionSize: INTEGER;
+BEGIN
+	NextSym; off := tp.size; tp.size := 0;
+	
+	IF sym = Scanner.bar THEN
+		Error(superfluousBarError); NextSym
+	END;
+	
+	REPEAT
+		IF sym = Scanner.semicolon THEN
+			Error(superfluousSemicolonError); NextSym
+		END;
+		IF sym = Scanner.ident THEN
+			(* FieldListSequence *)
+			REPEAT FieldList(tp);
+				IF sym = Scanner.semicolon THEN NextSym;
+					IF sym = Scanner.end THEN Error(superfluousSemicolonError)
+					ELSIF sym # Scanner.ident THEN Error(notFieldList)
+					END
+				END
+			UNTIL sym # Scanner.ident;
+		END;
+		IF sym = Scanner.bar THEN NextSym;
+			IF sym = Scanner.end THEN Error(superfluousBarError)
+			ELSIF sym # Scanner.ident THEN Error(notFieldList)
+			END
+		END;
+	UNTIL sym # Scanner.ident;
+	Check(Scanner.end, noEndError)
+END Union;
 
 PROCEDURE type(VAR tp: Base.Type);
 	VAR obj: Base.Object; x: Base.Item;
@@ -115,7 +154,19 @@ BEGIN tp := Base.intType;
 		type(tpArray.base); CalculateArraySize(tp, tpArray)
 	ELSIF sym = Scanner.record THEN NextSym;
 		Base.NewType(tp, Base.tnRecord);
-		
+		IF sym = Scanner.ident THEN FieldList(tp)
+		ELSIF sym = Scanner.union THEN Union(tp)
+		ELSIF sym # Scanner.end THEN Error(notFieldList)
+		END;
+		OpenScope('');
+		WHILE sym = Scanner.semicolon DO NextSym
+			IF sym = Scanner.ident THEN FieldList(tp)
+			ELSIF sym = Scanner.union THEN Union(tp)
+			ELSE Error(superfluousSemicolonError)
+			END
+		END
+		CloseScope;
+		Check(Scanner.end, noEndError)
 	END
 END type;
 
@@ -151,7 +202,7 @@ BEGIN
 					SymTable.New(obj, Scanner.id, Base.cVar);
 					IF first = Base.guard THEN first := obj END;
 					NextSym
-				ELSE Error(superflousCommaError)
+				ELSE Error(superfluousCommaError)
 				END
 			END;
 			Check(Scanner.colon, noColonError);
