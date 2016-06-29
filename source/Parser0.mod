@@ -12,11 +12,12 @@ CONST
 	noEqlError = 'No =';
 	noEndError = 'No END';
 	noOfError = 'No OF';
+	noToError = 'No TO';
 	
 	notConstError = 'Not a const';
 	notTypeError = 'Not a type';
-	notIntType = 'Not an integer';
-	notFieldList = 'Not a field list';
+	notIntTypeError = 'Not an integer';
+	notFieldListError = 'Not a field list';
 	
 	superfluousCommaError = 'Superfluous ,';
 	superfluousSemicolonError = 'Superfluous ;';
@@ -38,7 +39,7 @@ END MakeIntConst;
 PROCEDURE CheckInt(VAR x: Base.Item);
 BEGIN
 	IF x.type.form # Base.tInt THEN
-		Error(notIntType); x.type := Base.intType
+		Error(notIntTypeError); x.type := Base.intType
 	END
 END CheckInt;
 
@@ -64,12 +65,6 @@ PROCEDURE expression(VAR x: Base.Item);
 BEGIN
 END expression;
 
-PROCEDURE CalculateArraySize(tp, tp2: Base.Type);
-BEGIN
-	IF tp # tp2 THEN CalculateArraySize(tp.base, tp2) END;
-	tp.size := tp.base.size * tp.len
-END CalculateArraySize;
-
 PROCEDURE FieldList(tp: Base.Type);
 	VAR first, field: Base.Object;
 		fieldType: Base.Type;
@@ -85,8 +80,7 @@ BEGIN
 		END
 	END;
 	Check(Scanner.colon, noColonError); type(fieldType);
-	n := tp.size; n := n - n MOD fieldType.alignment;
-	IF n < tp.size THEN n := n + fieldType.alignment END;
+	n := tp.size; n := n + (-n) MOD fieldType.alignment; tp.size := n;
 	IF fieldType.alignment > tp.alignment THEN
 		tp.alignment := fieldType.alignment
 	END;
@@ -102,13 +96,14 @@ END FieldList;
 
 PROCEDURE Union(tp: Base.Type);
 	VAR off, tpAlign, unionSize: INTEGER;
+		field: Base.Object;
 BEGIN
-	NextSym; off := tp.size; tp.size := 0;
+	NextSym; off := tp.size; tp.size := 0; unionSize := 0;
+	tpAlign := tp.alignment; tp.alignment := 0;
+	field := SymTable.topScope;
+	WHILE field.next # Base.guard DO field := field.next END;
 	
-	IF sym = Scanner.bar THEN
-		Error(superfluousBarError); NextSym
-	END;
-	
+	IF sym = Scanner.bar THEN Error(superfluousBarError); NextSym END;
 	REPEAT
 		IF sym = Scanner.semicolon THEN
 			Error(superfluousSemicolonError); NextSym
@@ -118,19 +113,34 @@ BEGIN
 			REPEAT FieldList(tp);
 				IF sym = Scanner.semicolon THEN NextSym;
 					IF sym = Scanner.end THEN Error(superfluousSemicolonError)
-					ELSIF sym # Scanner.ident THEN Error(notFieldList)
+					ELSIF sym # Scanner.ident THEN Error(notFieldListError)
 					END
 				END
 			UNTIL sym # Scanner.ident;
 		END;
 		IF sym = Scanner.bar THEN NextSym;
 			IF sym = Scanner.end THEN Error(superfluousBarError)
-			ELSIF sym # Scanner.ident THEN Error(notFieldList)
-			END
+			ELSIF sym # Scanner.ident THEN Error(notFieldListError)
+			END;
+			IF tp.size > unionSize THEN unionSize := tp.size END;
+			tp.size := 0
 		END;
 	UNTIL sym # Scanner.ident;
+	
+	off := off + (-off) MOD tp.alignment; tp.size := off + unionSize;
+	IF tpAlign > tp.alignment THEN tp.alignment := tpAlign END;
+	field := field.next;
+	WHILE field # Base.guard DO
+		field.val := field.val + off; field := field.next
+	END;
 	Check(Scanner.end, noEndError)
 END Union;
+
+PROCEDURE CalculateArraySize(tp, tp2: Base.Type);
+BEGIN
+	IF tp # tp2 THEN CalculateArraySize(tp.base, tp2) END;
+	tp.size := tp.base.size * tp.len; tp.alignment := tp.base.alignment
+END CalculateArraySize;
 
 PROCEDURE type(VAR tp: Base.Type);
 	VAR obj: Base.Object; x: Base.Item;
@@ -153,20 +163,26 @@ BEGIN tp := Base.intType;
 		Check(Scanner.of, noOfError);
 		type(tpArray.base); CalculateArraySize(tp, tpArray)
 	ELSIF sym = Scanner.record THEN NextSym;
-		Base.NewType(tp, Base.tnRecord);
-		IF sym = Scanner.ident THEN FieldList(tp)
-		ELSIF sym = Scanner.union THEN Union(tp)
-		ELSIF sym # Scanner.end THEN Error(notFieldList)
+		Base.NewType(tp, Base.tnRecord); OpenScope('');
+		tp.size := 0; tp.alignment := 0;		
+		IF sym = Scanner.semicolon THEN
+			Error(superfluousSemicolonError); NextSym
 		END;
-		OpenScope('');
-		WHILE sym = Scanner.semicolon DO NextSym
+		REPEAT
 			IF sym = Scanner.ident THEN FieldList(tp)
 			ELSIF sym = Scanner.union THEN Union(tp)
-			ELSE Error(superfluousSemicolonError)
+			END;
+			IF sym = Scanner.semicolon THEN NextSym;
+				IF sym = Scanner.end THEN Error(superfluousSemicolonError)
+				ELSIF (sym # Scanner.ident) OR (sym # Scanner.union) THEN
+					Error(notFieldListError)
+				END
 			END
-		END
-		CloseScope;
-		Check(Scanner.end, noEndError)
+		UNTIL (sym # Scanner.ident) & (sym # Scanner.union);		
+		Check(Scanner.end, noEndError); CloseScope
+	ELSIF sym = Scanner.pointer THEN
+		NextSym; Check(Scanner.to, noToError);
+		
 	END
 END type;
 
