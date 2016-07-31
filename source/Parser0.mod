@@ -18,13 +18,23 @@ CONST
 	notTypeError = 'Not a type';
 	notIntTypeError = 'Not an integer';
 	notFieldListError = 'Not a field list';
+	notRecordTypeError = 'Not a record type';
 	
 	superfluousCommaError = 'Superfluous ,';
 	superfluousSemicolonError = 'Superfluous ;';
 	superfluousBarError = 'Superfluous |';
 	
+	circDefError = 'Circular definition';
+	
+TYPE
+	UndefPtrList = POINTER TO RECORD
+		name: Base.IdStr; tp: Base.Type
+	END;
+	
 VAR
 	sym*: INTEGER;
+	undefList: UndefPtrList;
+	defObj: Base.Object;
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -65,12 +75,25 @@ PROCEDURE expression(VAR x: Base.Item);
 BEGIN
 END expression;
 
+PROCEDURE FormalParameters(proc: Base.Type);
+	VAR first, obj: Base.Object;
+BEGIN NextSym;
+	IF sym = Scanner.ident THEN
+		REPEAT
+			REPEAT
+				SymTable.New(first, Scanner.id, Base.cVar); NextSym;
+				WHILE sym 
+			UNTIL sym # Scanner.ident
+		UNTIL sym # Scanner.ident
+	END
+END FormalParameters;
+
 PROCEDURE FieldList(tp: Base.Type);
 	VAR first, field: Base.Object;
 		fieldType: Base.Type;
 		n: INTEGER;
 BEGIN
-	SymTable.New(first, Scanner.id, Base.cField);
+	SymTable.New(first, Scanner.id, Base.cField); NextSym;
 	WHILE sym = Scanner.comma DO NextSym;
 		IF sym = Scanner.ident THEN
 			SymTable.New(field, Scanner.id, Base.cField);
@@ -136,19 +159,29 @@ BEGIN
 	Check(Scanner.end, noEndError)
 END Union;
 
-PROCEDURE CalculateArraySize(tp, tp2: Base.Type);
-BEGIN
-	IF tp # tp2 THEN CalculateArraySize(tp.base, tp2) END;
-	tp.size := tp.base.size * tp.len; tp.alignment := tp.base.alignment
-END CalculateArraySize;
-
 PROCEDURE type(VAR tp: Base.Type);
-	VAR obj: Base.Object; x: Base.Item;
+	VAR obj: Base.Object;
+		x: Base.Item;
 		tpArray: Base.Type;
-BEGIN tp := Base.intType;
+		undef: UndefPtrList;
+		tpName: Base.IdStr;
+		
+	PROCEDURE CalculateArraySize(tp, tp2: Base.Type);
+	BEGIN
+		IF tp # tp2 THEN CalculateArraySize(tp.base, tp2) END;
+		tp.size := tp.base.size * tp.len;
+		tp.alignment := tp.base.alignment
+	END CalculateArraySize;
+	
+BEGIN (* type *)
+	tp := Base.intType;
 	IF sym = Scanner.ident THEN
 		qualident(obj);
-		IF obj.class = Base.cType THEN tp := obj.type
+		IF obj.class = Base.cType THEN
+			IF (obj # defObj) OR (obj.type.form = Base.tNPointer) THEN
+				tp := obj.type
+			ELSE Error(circDefError)
+			END
 		ELSE Error(notTypeError)
 		END
 	ELSIF sym = Scanner.array THEN NextSym;
@@ -163,7 +196,7 @@ BEGIN tp := Base.intType;
 		Check(Scanner.of, noOfError);
 		type(tpArray.base); CalculateArraySize(tp, tpArray)
 	ELSIF sym = Scanner.record THEN NextSym;
-		Base.NewType(tp, Base.tnRecord); OpenScope('');
+		Base.NewType(tp, Base.tNRecord); OpenScope('');
 		tp.size := 0; tp.alignment := 0;		
 		IF sym = Scanner.semicolon THEN
 			Error(superfluousSemicolonError); NextSym
@@ -182,7 +215,22 @@ BEGIN tp := Base.intType;
 		Check(Scanner.end, noEndError); CloseScope
 	ELSIF sym = Scanner.pointer THEN
 		NextSym; Check(Scanner.to, noToError);
-		
+		Base.NewType(tp, Base.tNPointer); tp.base := Base.intType;
+		tp.size := Base.WordSize; tp.alignment := Base.WordSize;
+		IF sym = Scanner.ident THEN qualident(obj);
+			IF obj.class = Base.cType THEN
+				IF obj.type.form = Base.tNRecord THEN tp.base := obj.type
+				ELSE Error(notRecordTypeError)
+				END
+			ELSIF (obj = Base.guard) & ~isQualident THEN
+				NEW(undef); undef.tp := tp; undef.name := obj.name;
+				undef.next := undefList; undefList := undef
+			ELSE Error(notTypeError)
+			END
+		ELSIF sym = Scanner.record THEN type(tp.base)
+		END
+	ELSIF sym = Scanner.procedure THEN
+		(* stub *)
 	END
 END type;
 
@@ -207,7 +255,13 @@ BEGIN
 	END;
 	
 	IF sym = Scanner.type THEN NextSym;
+		WHILE sym = Scanner.ident DO
+			id := Scanner.id; SymTable.New(obj, id, Base.cType);
+			defObj := obj; NextSym; Check(Scanner.equal, noEqlError);
+			type(obj.type); Check(Scanner.semicolon, noSemicolonError)
+		END
 	END;
+	defObj := NIL;
 	
 	varsize := 0;
 	IF sym = Scanner.var THEN NextSym;
