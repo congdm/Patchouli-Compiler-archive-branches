@@ -13,6 +13,7 @@ CONST
 	noEndError = 'No END';
 	noOfError = 'No OF';
 	noToError = 'No TO';
+	noIdentError = 'Identifier expected';
 	
 	notConstError = 'Not a const';
 	notTypeError = 'Not a type';
@@ -73,18 +74,47 @@ END Error;
 
 PROCEDURE expression(VAR x: Base.Item);
 BEGIN
+	(* stub *)
 END expression;
 
 PROCEDURE FormalParameters(proc: Base.Type);
 	VAR first, obj: Base.Object;
-BEGIN NextSym;
-	IF sym = Scanner.ident THEN
+		tp: Base.Type;
+		cls, parSize, tpSize: INTEGER;
+		ronly: BOOLEAN;
+BEGIN SymTable.OpenScope(''); parSize := 0; NextSym;
+	IF (sym = Scanner.ident) OR (sym = Scanner.var) THEN
 		REPEAT
-			REPEAT
-				SymTable.New(first, Scanner.id, Base.cVar); NextSym;
-				WHILE sym 
-			UNTIL sym # Scanner.ident
-		UNTIL sym # Scanner.ident
+			IF sym = Scanner.var THEN cls := Base.cRef; NextSym
+			ELSE cls := Base.cVar
+			END;
+			IF sym = Scanner.ident THEN
+				SymTable.New(first, Scanner.id, cls);
+				WHILE sym = Scanner.comma DO NextSym;
+					IF sym = Scanner.ident THEN
+						SymTable.New(obj, Scanner.id, cls); NextSym
+						IF first = Base.guard THEN first := obj END
+					ELSE Error(superfluousCommaError)
+					END
+				END
+			ELSE Error(noIdentError)
+			END;
+			Check(Scanner.colon, noColonError); FormalType(tp);
+			ronly := FALSE; tpSize := tp.size;
+			IF 
+			IF cls = Base.cVar THEN
+				IF (tp.size # 1) & (tp.size # 2)
+					& (tp.size # 4) & (tp.size # 8)
+				THEN cls := cRef
+				END
+			END;
+			obj := first;
+			WHILE obj # Base.guard DO
+				obj.class := cls;
+				obj.readOnly := ronly;
+				obj.val := parSize; parSize := parSize 
+			END
+		UNTIL (sym # Scanner.ident) & (sym # Scanner.var)
 	END
 END FormalParameters;
 
@@ -108,7 +138,7 @@ BEGIN
 		tp.alignment := fieldType.alignment
 	END;
 	field := first;
-	WHILE obj # Base.guard DO
+	WHILE field # Base.guard DO
 		field.type := fieldType;
 		field.lev := SymTable.curLev;
 		field.val := n;

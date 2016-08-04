@@ -32,12 +32,14 @@ TYPE
 	
 	Object* = POINTER TO ObjectDesc;
 	ObjectDesc* = RECORD
+		readOnly*: BOOLEAN;
 		type*: Type;
 		dsc*, next*: Object;
 		val*, lev*, class*: INTEGER
 	END;
 	
 	Item* = RECORD
+		readOnly*: BOOLEAN;
 		type*: Type;
 		a*, b*, c*, r*: INTEGER;
 		mode*, lev*: INTEGER
