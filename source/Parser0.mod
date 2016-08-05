@@ -14,12 +14,14 @@ CONST
 	noOfError = 'No OF';
 	noToError = 'No TO';
 	noIdentError = 'Identifier expected';
+	noRParenError = 'No )';
 	
 	notConstError = 'Not a const';
 	notTypeError = 'Not a type';
 	notIntTypeError = 'Not an integer';
 	notFieldListError = 'Not a field list';
 	notRecordTypeError = 'Not a record type';
+	notParamDeclError = 'Not formal parameter declaration';
 	
 	superfluousCommaError = 'Superfluous ,';
 	superfluousSemicolonError = 'Superfluous ;';
@@ -80,9 +82,10 @@ END expression;
 PROCEDURE FormalParameters(proc: Base.Type);
 	VAR first, obj: Base.Object;
 		tp: Base.Type;
-		cls, parSize, tpSize: INTEGER;
+		cls, parblksize, size, nopar: INTEGER;
 		ronly: BOOLEAN;
-BEGIN SymTable.OpenScope(''); parSize := 0; NextSym;
+BEGIN SymTable.OpenScope('');
+	parblksize := 0; nopar := 0; NextSym;
 	IF (sym = Scanner.ident) OR (sym = Scanner.var) THEN
 		REPEAT
 			IF sym = Scanner.var THEN cls := Base.cRef; NextSym
@@ -100,21 +103,46 @@ BEGIN SymTable.OpenScope(''); parSize := 0; NextSym;
 			ELSE Error(noIdentError)
 			END;
 			Check(Scanner.colon, noColonError); FormalType(tp);
-			ronly := FALSE; tpSize := tp.size;
-			IF 
+			ronly := FALSE; size := Base.WordSize;
+			IF (tp.form = Base.tArray) & (tp.len = 0) THEN
+				size := tp.size
+			END;
 			IF cls = Base.cVar THEN
-				IF (tp.size # 1) & (tp.size # 2)
+				IF (tp.form = Base.tArray) & (tp.len = 0)
+				OR (tp.size # 1) & (tp.size # 2)
 					& (tp.size # 4) & (tp.size # 8)
 				THEN cls := cRef
-				END
+				END;
+				ronly := tp.form IN {Base.tArray, Base.tNRecord}
 			END;
 			obj := first;
 			WHILE obj # Base.guard DO
 				obj.class := cls;
 				obj.readOnly := ronly;
-				obj.val := parSize; parSize := parSize 
+				obj.val := parSize;
+				obj.type := tp;
+				parblksize := parblksize + size; INC(nopar);
+				obj := obj.next
+			END;
+			IF sym = Scanner.semicolon THEN NextSym;
+				IF sym = Scanner.rparen THEN Error(superfluousSemicolonError)
+				ELSIF (sym # Scanner.ident) & (sym # Scanner.var) THEN
+					Error(notParamDeclError)
+				END
 			END
-		UNTIL (sym # Scanner.ident) & (sym # Scanner.var)
+		UNTIL (sym # Scanner.ident) & (sym # Scanner.var);
+		proc.fields := topScope.next; CloseScope;
+		proc.parblksize := parblksize; proc.nopar := nopar;
+		Check(Scanner.rparen, noRParenError);
+		IF sym = Scanner.colon THEN NextSym; qualident(obj);
+			IF obj.class = Base.cType THEN
+				proc.base := obj.type; size := obj.type.size;
+				IF (size # 1) & (size # 2) & (size # 4) & (size # 8) THEN
+					Error(notValidRetType); proc.base := Base.intType
+				END
+			ELSE Error(notTypeError)
+			END
+		END
 	END
 END FormalParameters;
 
@@ -205,8 +233,7 @@ PROCEDURE type(VAR tp: Base.Type);
 	
 BEGIN (* type *)
 	tp := Base.intType;
-	IF sym = Scanner.ident THEN
-		qualident(obj);
+	IF sym = Scanner.ident THEN qualident(obj);
 		IF obj.class = Base.cType THEN
 			IF (obj # defObj) OR (obj.type.form = Base.tNPointer) THEN
 				tp := obj.type
@@ -241,8 +268,9 @@ BEGIN (* type *)
 					Error(notFieldListError)
 				END
 			END
-		UNTIL (sym # Scanner.ident) & (sym # Scanner.union);		
-		Check(Scanner.end, noEndError); CloseScope
+		UNTIL (sym # Scanner.ident) & (sym # Scanner.union);
+		tp.fields := topScope.next; CloseScope;
+		Check(Scanner.end, noEndError)
 	ELSIF sym = Scanner.pointer THEN
 		NextSym; Check(Scanner.to, noToError);
 		Base.NewType(tp, Base.tNPointer); tp.base := Base.intType;

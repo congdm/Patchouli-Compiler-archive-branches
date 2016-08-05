@@ -27,6 +27,8 @@ TYPE
 	Type* = POINTER TO TypeDesc;
 	TypeDesc* = RECORD
 		form*, len*, size*: INTEGER;
+		nopar*, parblksize*: INTEGER;
+		fields*: Object;
 		base*: Type
 	END;
 	
