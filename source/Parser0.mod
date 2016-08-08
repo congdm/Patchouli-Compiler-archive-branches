@@ -21,13 +21,11 @@ CONST
 	notIntTypeError = 'Not an integer';
 	notFieldListError = 'Not a field list';
 	notRecordTypeError = 'Not a record type';
-	notParamDeclError = 'Not formal parameter declaration';
+	notCompatibleType = 'Not compatible type';
 	
 	superfluousCommaError = 'Superfluous ,';
 	superfluousSemicolonError = 'Superfluous ;';
 	superfluousBarError = 'Superfluous |';
-	
-	circDefError = 'Circular definition';
 	
 TYPE
 	UndefPtrList = POINTER TO RECORD
@@ -79,14 +77,102 @@ BEGIN
 	(* stub *)
 END expression;
 
+PROCEDURE FieldList(tp: Base.Type);
+	VAR first, field: Base.Object;
+		fieldType: Base.Type;
+		n: INTEGER;
+BEGIN
+	SymTable.New(first, Scanner.id, Base.cField); NextSym;
+	WHILE sym = Scanner.comma DO NextSym;
+		IF sym = Scanner.ident THEN
+			SymTable.New(field, Scanner.id, Base.cField);
+			IF first = Base.guard THEN first := field END;
+			NextSym
+		ELSE Error(superfluousCommaError)
+		END
+	END;
+	Check(Scanner.colon, noColonError); type(fieldType);
+	n := tp.size; n := n + (-n) MOD fieldType.alignment; tp.size := n;
+	IF fieldType.alignment > tp.alignment THEN
+		tp.alignment := fieldType.alignment
+	END;
+	field := first;
+	WHILE field # Base.guard DO
+		field.type := fieldType;
+		field.lev := SymTable.curLev;
+		field.val := n;
+		n := n + fieldType.size; tp.size := n;
+		field := field.next
+	END;
+END FieldList;
+
+PROCEDURE Union(tp: Base.Type);
+	VAR off, tpAlign, unionSize: INTEGER;
+		field, prev: Base.Object;
+BEGIN
+	NextSym; off := tp.size; tp.size := 0; unionSize := 0;
+	tpAlign := tp.alignment; tp.alignment := 0;
+	prev := SymTable.topScope;
+	WHILE prev.next # Base.guard DO prev := prev.next END;
+	
+	IF sym = Scanner.bar THEN Error(superfluousBarError); NextSym END;
+	REPEAT
+		IF sym = Scanner.semicolon THEN
+			Error(superfluousSemicolonError); NextSym
+		END;
+		IF sym = Scanner.ident THEN
+			(* FieldListSequence *)
+			REPEAT FieldList(tp);
+				IF sym = Scanner.semicolon THEN NextSym;
+					IF sym = Scanner.end THEN Error(superfluousSemicolonError)
+					ELSIF sym # Scanner.ident THEN Error(notFieldListError)
+					END
+				END
+			UNTIL sym # Scanner.ident;
+		END;
+		IF sym = Scanner.bar THEN NextSym;
+			IF sym = Scanner.end THEN Error(superfluousBarError)
+			ELSIF sym # Scanner.ident THEN Error(notFieldListError)
+			END;
+			IF tp.size > unionSize THEN unionSize := tp.size END;
+			tp.size := 0
+		END;
+	UNTIL sym # Scanner.ident;
+	
+	off := off + (-off) MOD tp.alignment; tp.size := off + unionSize;
+	IF tpAlign > tp.alignment THEN tp.alignment := tpAlign END;
+	field := prev.next;
+	WHILE field # Base.guard DO
+		field.val := field.val + off;
+		field := field.next
+	END;
+	Check(Scanner.end, noEndError)
+END Union;
+
+PROCEDURE FormalType(VAR tp: Base.Type);
+BEGIN tp := Base.intType;
+	IF sym = Scanner.ident THEN qualident(obj);
+		IF obj.class = Base.cType THEN tp := obj.type
+		ELSE Error(notTypeError)
+		END
+	ELSIF sym = Scanner.array THEN
+		Base.NewType(tp, Base.tArray); tp.len := 0;
+		NextSym; Check(Scanner.of, noOfError); FormalType(tp.base);
+		IF (tp.base.form # Base.tArray) OR (tp.base.len # 0) THEN
+			tp.size := Base.WordSize * 2
+		ELSE tp.size := tp.base.size + Base.WordSize
+		END
+	END
+END FormalType;
+
 PROCEDURE FormalParameters(proc: Base.Type);
 	VAR first, obj: Base.Object;
 		tp: Base.Type;
 		cls, parblksize, size, nopar: INTEGER;
 		ronly: BOOLEAN;
-BEGIN SymTable.OpenScope('');
-	parblksize := 0; nopar := 0; NextSym;
+BEGIN NextSym;
 	IF (sym = Scanner.ident) OR (sym = Scanner.var) THEN
+		SymTable.OpenScope(''); parblksize := 0; nopar := 0;
 		REPEAT
 			IF sym = Scanner.var THEN cls := Base.cRef; NextSym
 			ELSE cls := Base.cVar
@@ -127,7 +213,7 @@ BEGIN SymTable.OpenScope('');
 			IF sym = Scanner.semicolon THEN NextSym;
 				IF sym = Scanner.rparen THEN Error(superfluousSemicolonError)
 				ELSIF (sym # Scanner.ident) & (sym # Scanner.var) THEN
-					Error(notParamDeclError)
+					Error('Param declaration?')
 				END
 			END
 		UNTIL (sym # Scanner.ident) & (sym # Scanner.var);
@@ -138,7 +224,7 @@ BEGIN SymTable.OpenScope('');
 			IF obj.class = Base.cType THEN
 				proc.base := obj.type; size := obj.type.size;
 				IF (size # 1) & (size # 2) & (size # 4) & (size # 8) THEN
-					Error(notValidRetType); proc.base := Base.intType
+					Error('Invalid return type); proc.base := Base.intType
 				END
 			ELSE Error(notTypeError)
 			END
@@ -146,76 +232,12 @@ BEGIN SymTable.OpenScope('');
 	END
 END FormalParameters;
 
-PROCEDURE FieldList(tp: Base.Type);
-	VAR first, field: Base.Object;
-		fieldType: Base.Type;
-		n: INTEGER;
-BEGIN
-	SymTable.New(first, Scanner.id, Base.cField); NextSym;
-	WHILE sym = Scanner.comma DO NextSym;
-		IF sym = Scanner.ident THEN
-			SymTable.New(field, Scanner.id, Base.cField);
-			IF first = Base.guard THEN first := field END;
-			NextSym
-		ELSE Error(superfluousCommaError)
-		END
-	END;
-	Check(Scanner.colon, noColonError); type(fieldType);
-	n := tp.size; n := n + (-n) MOD fieldType.alignment; tp.size := n;
-	IF fieldType.alignment > tp.alignment THEN
-		tp.alignment := fieldType.alignment
-	END;
-	field := first;
-	WHILE field # Base.guard DO
-		field.type := fieldType;
-		field.lev := SymTable.curLev;
-		field.val := n;
-		n := n + fieldType.size; tp.size := n;
-		field := field.next
-	END;
-END FieldList;
-
-PROCEDURE Union(tp: Base.Type);
-	VAR off, tpAlign, unionSize: INTEGER;
-		field: Base.Object;
-BEGIN
-	NextSym; off := tp.size; tp.size := 0; unionSize := 0;
-	tpAlign := tp.alignment; tp.alignment := 0;
-	field := SymTable.topScope;
-	WHILE field.next # Base.guard DO field := field.next END;
-	
-	IF sym = Scanner.bar THEN Error(superfluousBarError); NextSym END;
-	REPEAT
-		IF sym = Scanner.semicolon THEN
-			Error(superfluousSemicolonError); NextSym
-		END;
-		IF sym = Scanner.ident THEN
-			(* FieldListSequence *)
-			REPEAT FieldList(tp);
-				IF sym = Scanner.semicolon THEN NextSym;
-					IF sym = Scanner.end THEN Error(superfluousSemicolonError)
-					ELSIF sym # Scanner.ident THEN Error(notFieldListError)
-					END
-				END
-			UNTIL sym # Scanner.ident;
-		END;
-		IF sym = Scanner.bar THEN NextSym;
-			IF sym = Scanner.end THEN Error(superfluousBarError)
-			ELSIF sym # Scanner.ident THEN Error(notFieldListError)
-			END;
-			IF tp.size > unionSize THEN unionSize := tp.size END;
-			tp.size := 0
-		END;
-	UNTIL sym # Scanner.ident;
-	
-	off := off + (-off) MOD tp.alignment; tp.size := off + unionSize;
-	IF tpAlign > tp.alignment THEN tp.alignment := tpAlign END;
-	field := field.next;
-	WHILE field # Base.guard DO
-		field.val := field.val + off; field := field.next
-	END;
-	Check(Scanner.end, noEndError)
-END Union;
+PROCEDURE NewProcedureType(VAR tp: Base.Type);
+BEGIN Base.NewType(tp, Base.tProcedure);
+	tp.size := Base.WordSize; tp.alignment := Base.WordSize;
+	tp.parblksize := 0; tp.nopar := 0; tp.fields := Base.guard;
+	IF sym = Scanner.lparen THEN FormalParameters(tp) END
+END NewProcedureType;
 
 PROCEDURE type(VAR tp: Base.Type);
 	VAR obj: Base.Object;
@@ -237,7 +259,7 @@ BEGIN (* type *)
 		IF obj.class = Base.cType THEN
 			IF (obj # defObj) OR (obj.type.form = Base.tNPointer) THEN
 				tp := obj.type
-			ELSE Error(circDefError)
+			ELSE Error('Circular definition')
 			END
 		ELSE Error(notTypeError)
 		END
@@ -253,7 +275,7 @@ BEGIN (* type *)
 		Check(Scanner.of, noOfError);
 		type(tpArray.base); CalculateArraySize(tp, tpArray)
 	ELSIF sym = Scanner.record THEN NextSym;
-		Base.NewType(tp, Base.tNRecord); OpenScope('');
+		Base.NewType(tp, Base.tNRecord); SymTable.OpenScope('');
 		tp.size := 0; tp.alignment := 0;		
 		IF sym = Scanner.semicolon THEN
 			Error(superfluousSemicolonError); NextSym
@@ -288,14 +310,16 @@ BEGIN (* type *)
 		ELSIF sym = Scanner.record THEN type(tp.base)
 		END
 	ELSIF sym = Scanner.procedure THEN
-		(* stub *)
+		NextSym; NewProcedureType(tp)
 	END
 END type;
 
 PROCEDURE DeclarationSequence(VAR varsize: INTEGER);
-	VAR id: Base.IdStr; x: Base.Item;
-		first, obj: Base.Object; typ: Base.Type;
-		n: INTEGER;
+	VAR id: Base.IdStr;
+		x: Base.Item;
+		first, obj, proc, param: Base.Object;
+		typ: Base.Type;
+		n, locblksize: INTEGER;
 BEGIN
 	IF sym = Scanner.const THEN NextSym;
 		WHILE sym = Scanner.ident DO
@@ -343,6 +367,45 @@ BEGIN
 				obj := obj.next
 			END;
 			Check(Scanner.semicolon, noSemicolonError)
+		END
+	END;
+	
+	WHILE sym = Scanner.procedure DO NextSym;
+		IF sym = Scanner.ident THEN id := Scanner.id;
+			SymTable.New(proc, id, Base.cProc);
+			IF proc # Base.guard THEN
+				NextSym; NewProcedureType(proc.type);
+				Check(Scanner.semicolon, noSemicolonError);
+				SymTable.OpenScope(id); param := proc.type.fields;
+				WHILE param # Base.guard DO
+					SymTable.New(obj, param.name, Base.cVar);
+					obj^ := param^; obj.next := Base.guard;
+					param := param.next
+				END;
+				DeclarationSequence(locblksize);
+				Generator.Enter;
+				IF sym = Scanner.begin THEN NextSym; StatementSequence END;
+				IF sym = Scanner.return THEN
+					IF proc.type.base = NIL THEN
+						Error('Proper procedure can't have RETURN')
+					END;
+					NextSym; expression(x);
+					IF ~CompatibleType(x.type, proc.type.base) THEN
+						Error(notCompatibleType)
+					END
+				ELSIF proc.type.base # NIL THEN
+					Error('Function procedure need RETURN clause')
+				END;
+				Generator.Return;
+				Check(Scanner.end, noEndError);
+				IF sym = Scanner.ident THEN
+					IF Scanner.id # id THEN Error('Wrong procedure name') END
+				ELSE Error('No procedure name at the end')
+				END
+			ELSE WHILE sym < Scanner.const DO NextSym END
+			END		
+		ELSE Error(noIdentError);
+			WHILE sym < Scanner.const DO NextSym END
 		END
 	END
 END DeclarationSequence;

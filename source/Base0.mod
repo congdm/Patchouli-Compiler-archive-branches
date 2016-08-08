@@ -35,8 +35,9 @@ TYPE
 	Object* = POINTER TO ObjectDesc;
 	ObjectDesc* = RECORD
 		readOnly*: BOOLEAN;
-		type*: Type;
+		name*: IdStr;
 		dsc*, next*: Object;
+		type*: Type;
 		val*, lev*, class*: INTEGER
 	END;
 	
