@@ -2,7 +2,7 @@ MODULE Parser0;
 
 IMPORT
 	Base := Base0,
-	Scanner := Scanner,
+	Scanner := Scanner0,
 	SymTable := SymTable0,
 	Generator := Generator0;
 
@@ -29,16 +29,23 @@ CONST
 	
 TYPE
 	UndefPtrList = POINTER TO RECORD
-		name: Base.IdStr; tp: Base.Type
+		name: Base.IdStr; tp: Base.Type; next: UndefPtrList
 	END;
 	
 VAR
 	sym*: INTEGER;
+	isQualident: BOOLEAN;
 	undefList: UndefPtrList;
 	defObj: Base.Object;
 	
+	type0: PROCEDURE(VAR tp: Base.Type);
+	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
+
+PROCEDURE Error(err: ARRAY OF CHAR);
+BEGIN Scanner.Mark(err)
+END Error;
 
 PROCEDURE Check(expected: INTEGER; err: ARRAY OF CHAR);
 BEGIN IF sym = expected THEN Scanner.Get(sym) ELSE Scanner.Mark(err) END
@@ -47,9 +54,13 @@ END Check;
 PROCEDURE MakeIntConst(VAR x: Base.Item);
 END MakeIntConst;
 
+PROCEDURE NextSym;
+BEGIN Scanner.Get(sym)
+END NextSym;
+
 PROCEDURE CheckInt(VAR x: Base.Item);
 BEGIN
-	IF x.type.form # Base.tInt THEN
+	IF x.type.form # Base.tInteger THEN
 		Error(notIntTypeError); x.type := Base.intType
 	END
 END CheckInt;
@@ -61,21 +72,27 @@ BEGIN CheckInt(x);
 	END
 END CheckArrayLen;
 
-PROCEDURE NextSym;
-BEGIN Scanner.Get(sym)
-END NextSym;
-	
-PROCEDURE Error(err: INTEGER);
-BEGIN Scanner.Mark(err)
-END Error;
+PROCEDURE CompatibleType(xtype, ytype: Base.Type): BOOLEAN;
+	RETURN TRUE
+END CompatibleType;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
+
+PROCEDURE qualident(VAR obj: Base.Object);
+BEGIN
+END qualident;
 
 PROCEDURE expression(VAR x: Base.Item);
 BEGIN
 	(* stub *)
 END expression;
+
+PROCEDURE StatementSequence;
+END StatementSequence;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
 
 PROCEDURE FieldList(tp: Base.Type);
 	VAR first, field: Base.Object;
@@ -91,10 +108,10 @@ BEGIN
 		ELSE Error(superfluousCommaError)
 		END
 	END;
-	Check(Scanner.colon, noColonError); type(fieldType);
-	n := tp.size; n := n + (-n) MOD fieldType.alignment; tp.size := n;
-	IF fieldType.alignment > tp.alignment THEN
-		tp.alignment := fieldType.alignment
+	Check(Scanner.colon, noColonError); type0(fieldType);
+	n := tp.size; n := n + (-n) MOD fieldType.align; tp.size := n;
+	IF fieldType.align > tp.align THEN
+		tp.align := fieldType.align
 	END;
 	field := first;
 	WHILE field # Base.guard DO
@@ -111,7 +128,7 @@ PROCEDURE Union(tp: Base.Type);
 		field, prev: Base.Object;
 BEGIN
 	NextSym; off := tp.size; tp.size := 0; unionSize := 0;
-	tpAlign := tp.alignment; tp.alignment := 0;
+	tpAlign := tp.align; tp.align := 0;
 	prev := SymTable.topScope;
 	WHILE prev.next # Base.guard DO prev := prev.next END;
 	
@@ -139,8 +156,8 @@ BEGIN
 		END;
 	UNTIL sym # Scanner.ident;
 	
-	off := off + (-off) MOD tp.alignment; tp.size := off + unionSize;
-	IF tpAlign > tp.alignment THEN tp.alignment := tpAlign END;
+	off := off + (-off) MOD tp.align; tp.size := off + unionSize;
+	IF tpAlign > tp.align THEN tp.align := tpAlign END;
 	field := prev.next;
 	WHILE field # Base.guard DO
 		field.val := field.val + off;
@@ -150,6 +167,7 @@ BEGIN
 END Union;
 
 PROCEDURE FormalType(VAR tp: Base.Type);
+	VAR obj: Base.Object;
 BEGIN tp := Base.intType;
 	IF sym = Scanner.ident THEN qualident(obj);
 		IF obj.class = Base.cType THEN tp := obj.type
@@ -181,7 +199,7 @@ BEGIN NextSym;
 				SymTable.New(first, Scanner.id, cls);
 				WHILE sym = Scanner.comma DO NextSym;
 					IF sym = Scanner.ident THEN
-						SymTable.New(obj, Scanner.id, cls); NextSym
+						SymTable.New(obj, Scanner.id, cls); NextSym;
 						IF first = Base.guard THEN first := obj END
 					ELSE Error(superfluousCommaError)
 					END
@@ -197,7 +215,7 @@ BEGIN NextSym;
 				IF (tp.form = Base.tArray) & (tp.len = 0)
 				OR (tp.size # 1) & (tp.size # 2)
 					& (tp.size # 4) & (tp.size # 8)
-				THEN cls := cRef
+				THEN cls := Base.cRef
 				END;
 				ronly := tp.form IN {Base.tArray, Base.tNRecord}
 			END;
@@ -205,7 +223,7 @@ BEGIN NextSym;
 			WHILE obj # Base.guard DO
 				obj.class := cls;
 				obj.readOnly := ronly;
-				obj.val := parSize;
+				obj.val := parblksize;
 				obj.type := tp;
 				parblksize := parblksize + size; INC(nopar);
 				obj := obj.next
@@ -217,14 +235,14 @@ BEGIN NextSym;
 				END
 			END
 		UNTIL (sym # Scanner.ident) & (sym # Scanner.var);
-		proc.fields := topScope.next; CloseScope;
+		proc.fields := SymTable.topScope.next; SymTable.CloseScope;
 		proc.parblksize := parblksize; proc.nopar := nopar;
 		Check(Scanner.rparen, noRParenError);
 		IF sym = Scanner.colon THEN NextSym; qualident(obj);
 			IF obj.class = Base.cType THEN
 				proc.base := obj.type; size := obj.type.size;
 				IF (size # 1) & (size # 2) & (size # 4) & (size # 8) THEN
-					Error('Invalid return type); proc.base := Base.intType
+					Error('Invalid return type'); proc.base := Base.intType
 				END
 			ELSE Error(notTypeError)
 			END
@@ -234,7 +252,7 @@ END FormalParameters;
 
 PROCEDURE NewProcedureType(VAR tp: Base.Type);
 BEGIN Base.NewType(tp, Base.tProcedure);
-	tp.size := Base.WordSize; tp.alignment := Base.WordSize;
+	tp.size := Base.WordSize; tp.align := Base.WordSize;
 	tp.parblksize := 0; tp.nopar := 0; tp.fields := Base.guard;
 	IF sym = Scanner.lparen THEN FormalParameters(tp) END
 END NewProcedureType;
@@ -250,7 +268,7 @@ PROCEDURE type(VAR tp: Base.Type);
 	BEGIN
 		IF tp # tp2 THEN CalculateArraySize(tp.base, tp2) END;
 		tp.size := tp.base.size * tp.len;
-		tp.alignment := tp.base.alignment
+		tp.align := tp.base.align
 	END CalculateArraySize;
 	
 BEGIN (* type *)
@@ -276,7 +294,7 @@ BEGIN (* type *)
 		type(tpArray.base); CalculateArraySize(tp, tpArray)
 	ELSIF sym = Scanner.record THEN NextSym;
 		Base.NewType(tp, Base.tNRecord); SymTable.OpenScope('');
-		tp.size := 0; tp.alignment := 0;		
+		tp.size := 0; tp.align := 0;		
 		IF sym = Scanner.semicolon THEN
 			Error(superfluousSemicolonError); NextSym
 		END;
@@ -291,12 +309,12 @@ BEGIN (* type *)
 				END
 			END
 		UNTIL (sym # Scanner.ident) & (sym # Scanner.union);
-		tp.fields := topScope.next; CloseScope;
+		tp.fields := SymTable.topScope.next; SymTable.CloseScope;
 		Check(Scanner.end, noEndError)
 	ELSIF sym = Scanner.pointer THEN
 		NextSym; Check(Scanner.to, noToError);
 		Base.NewType(tp, Base.tNPointer); tp.base := Base.intType;
-		tp.size := Base.WordSize; tp.alignment := Base.WordSize;
+		tp.size := Base.WordSize; tp.align := Base.WordSize;
 		IF sym = Scanner.ident THEN qualident(obj);
 			IF obj.class = Base.cType THEN
 				IF obj.type.form = Base.tNRecord THEN tp.base := obj.type
@@ -330,7 +348,7 @@ BEGIN
 			END;
 			SymTable.New(obj, id, x.mode);
 			IF obj # Base.guard THEN
-				obj.type := x.type; obj.val := x.val; obj.lev := x.lev
+				obj.type := x.type; obj.val := x.a; obj.lev := x.lev
 			END;
 			Check(Scanner.semicolon, noSemicolonError)
 		END
@@ -339,7 +357,7 @@ BEGIN
 	IF sym = Scanner.type THEN NextSym;
 		WHILE sym = Scanner.ident DO
 			id := Scanner.id; SymTable.New(obj, id, Base.cType);
-			defObj := obj; NextSym; Check(Scanner.equal, noEqlError);
+			defObj := obj; NextSym; Check(Scanner.eql, noEqlError);
 			type(obj.type); Check(Scanner.semicolon, noSemicolonError)
 		END
 	END;
@@ -362,7 +380,7 @@ BEGIN
 			WHILE obj # Base.guard DO
 				obj.type := typ;
 				obj.lev := SymTable.curLev;
-				n := varsize - typ.size; n := n - n MOD typ.alignment;
+				n := varsize - typ.size; n := n - n MOD typ.align;
 				obj.val := n; varsize := n;
 				obj := obj.next
 			END;
@@ -387,7 +405,7 @@ BEGIN
 				IF sym = Scanner.begin THEN NextSym; StatementSequence END;
 				IF sym = Scanner.return THEN
 					IF proc.type.base = NIL THEN
-						Error('Proper procedure can't have RETURN')
+						Error('Proper procedure cannot have RETURN')
 					END;
 					NextSym; expression(x);
 					IF ~CompatibleType(x.type, proc.type.base) THEN
@@ -419,7 +437,7 @@ BEGIN
 	END;
 	Check(Scanner.semicolon, noSemicolonError);
 	IF modid # '@' THEN
-		SymTable.Init(modid); Generator.Init(modid);
+		SymTable.Init(modid); Generator.Init;
 		(* IF sym = Scanner.import THEN ImportList END; *)
 		IF Scanner.errcnt = 0 THEN
 			varsize := 0; DeclarationSequence(varsize);
@@ -442,4 +460,5 @@ BEGIN
 END Module;
 
 BEGIN
+	type0 := type
 END Parser0.

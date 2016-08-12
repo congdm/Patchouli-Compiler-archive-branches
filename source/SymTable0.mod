@@ -1,7 +1,7 @@
 MODULE SymTable0;
 
 IMPORT
-	Base := Base0, Scanner;
+	Base := Base0, Scanner := Scanner0;
 	
 CONST
 	normalModule = 0;
@@ -14,7 +14,7 @@ VAR
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
-PROCEDURE OpenScope*(name: Base.IdentStr);
+PROCEDURE OpenScope*(name: Base.IdStr);
 	VAR scope: Base.Object;
 BEGIN
 	NEW(scope); scope.class := Base.cHead; scope.name := name;
@@ -25,10 +25,13 @@ PROCEDURE CloseScope*;
 BEGIN topScope := topScope.dsc
 END CloseScope;
 	
-PROCEDURE Init*(modid: Base.IdentStr);
+PROCEDURE Init*(modid: Base.IdStr);
 BEGIN
 	topScope := NIL; OpenScope(''); universe := topScope
 END Init;
+
+PROCEDURE New*(VAR obj: Base.Object; id: Base.IdStr; cls: INTEGER);
+END New;
 	
 BEGIN
 END SymTable0.

@@ -694,15 +694,17 @@ PROCEDURE Fill_pointer_offset (
 BEGIN ptrcnt := type.nptr;
 	IF type.form = Base.tRecord THEN
 		field := type.fields;
-		REPEAT k := field.type.nptr;
-			IF k > 0 THEN ptrcnt := ptrcnt - k; n := offset + field.val;
-				IF field.type.form = Base.tPointer THEN
-					SYSTEM.PUT (adr, n); adr := adr + 4
-				ELSE Fill_pointer_offset (n, adr, field.type)
-				END
-			END;
-			field := field.next
-		UNTIL ptrcnt <= 0; ASSERT (ptrcnt = 0)
+		IF field # Base.guard THEN
+			REPEAT k := field.type.nptr;
+				IF k > 0 THEN ptrcnt := ptrcnt - k; n := offset + field.val;
+					IF field.type.form = Base.tPointer THEN
+						SYSTEM.PUT (adr, n); adr := adr + 4
+					ELSE Fill_pointer_offset (n, adr, field.type)
+					END
+				END;
+				field := field.next
+			UNTIL ptrcnt <= 0; ASSERT (ptrcnt = 0)
+		END
 	ELSIF type.form = Base.tArray THEN type := type.base;
 		IF type.form = Base.tPointer THEN n := offset;
 			REPEAT

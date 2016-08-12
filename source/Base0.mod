@@ -23,16 +23,18 @@ CONST
 
 TYPE
 	IdStr* = ARRAY MaxIdLen+1 OF CHAR;
+	String* = ARRAY MaxStrLen+1 OF CHAR;
 	
 	Type* = POINTER TO TypeDesc;
+	Object* = POINTER TO ObjectDesc;
+	
 	TypeDesc* = RECORD
-		form*, len*, size*: INTEGER;
+		form*, len*, size*, align*: INTEGER;
 		nopar*, parblksize*: INTEGER;
 		fields*: Object;
 		base*: Type
 	END;
 	
-	Object* = POINTER TO ObjectDesc;
 	ObjectDesc* = RECORD
 		readOnly*: BOOLEAN;
 		name*: IdStr;
@@ -50,5 +52,9 @@ TYPE
 	
 VAR
 	guard*: Object;
+	intType*: Type;
+	
+PROCEDURE NewType*(VAR tp: Type; form: INTEGER);
+END NewType;
 
 END Base0.
