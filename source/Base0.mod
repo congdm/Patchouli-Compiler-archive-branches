@@ -19,7 +19,10 @@ CONST
 	tInteger* = 0; tBoolean* = 1; tSet* = 2; tChar* = 3;
 	tReal* = 4; tPointer* = 5; tProcedure* = 6;
 	tArray* = 7; tRecord* = 8; tString* = 9; tNil* = 10;
-	tNPointer* = 11; tNRecord* = 12;	
+	tNPointer* = 11; tNRecord* = 12;
+	
+	typeComparable1* = {tInteger, tChar, tReal};
+	typeComparable2* = {tBoolean, tSet, tPointer, tNPointer, tProcedure, tNil};
 
 TYPE
 	IdStr* = ARRAY MaxIdLen+1 OF CHAR;

@@ -21,7 +21,8 @@ CONST
 	notIntTypeError = 'Not an integer';
 	notFieldListError = 'Not a field list';
 	notRecordTypeError = 'Not a record type';
-	notCompatibleType = 'Not compatible type';
+	notCompTypeError = 'Not compatible type';
+	invalidCompareError = 'Invalid comparison';
 	
 	superfluousCommaError = 'Superfluous ,';
 	superfluousSemicolonError = 'Superfluous ;';
@@ -71,14 +72,15 @@ BEGIN CheckInt(x);
 	END
 END CheckArrayLen;
 
-PROCEDURE CompatibleType(t1, t2: Base.Type): BOOLEAN;
+PROCEDURE CompType(t1, t2: Base.Type): BOOLEAN;
 	RETURN (t1 = t2)
 	OR (t1.form = Base.tArray) & (t2.form = Base.tArray)
 		& (t1.base = t2.base) & (t1.len = t2.len)
 	OR (t1.form = Base.tNPointer) & (t2.form = Base.tNPointer)
 		& (t1.base = t2.base)
 	OR (t1.form IN {Base.tNPointer, Base.tProcedure}) & (t2 = Base.nilType)
-END CompatibleType;
+	OR (t2.form IN {Base.tNPointer, Base.tProcedure}) & (t1 = Base.nilType)
+END CompType;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -88,24 +90,42 @@ BEGIN
 	SymTable.Find(obj, Scanner.id)
 END qualident;
 
+PROCEDURE SimpleExpression(VAR x: Base.Item);
+BEGIN
+END SimpleExpression;
+
 PROCEDURE expression(VAR x: Base.Item);
 	VAR y: Base.Item;
-		xform: INTEGER;
+		xform, yform: INTEGER;
+		errorFlag: BOOLEAN;
 BEGIN
-	SimpleExpression(x);
+	SimpleExpression(x); xform := x.type.form; errorFlag := FALSE;
 	IF (sym >= Scanner.eql) OR (sym <= Scanner.geq) THEN
-		xform := x.type.form; NextSym; SimpleExpression(y);
-		IF xform = Base.tInt THEN
-			CheckInt(y); Generator.Compare(x, y, sym)
-		ELSIF xform = Base.tReal THEN
-			CheckReal(y); Generator.Compare(x, y, sym)
-		ELSIF (xform = Base.tArray) & (y.type.form 
+		NextSym; SimpleExpression(y); yform := y.type.form;
+		IF (xform IN Base.typeComparable1) & (xform = yform)
+		OR (xform IN Base.typeComparable2)
+			& (sym <= Scanner.neq) & CompType(x.type, y.type)
+		THEN Generator.Compare(x, y, sym)
+		ELSIF (xform = Base.tArray) & (x.type.base.form = Base.tChar)
+			& (yform = Base.tArray) & (y.type.base.form = Base.tChar)
+		THEN Generator.StrCompare(x, y, sym)
+		ELSE errorFlag := TRUE
+		END
 	ELSIF sym = Scanner.in THEN
-		NextSym; SimpleExpression(y);
+		NextSym; SimpleExpression(y); yform := y.type.form;
+		IF (xform = Base.tInteger) & (yform = Base.tSet) THEN
+			Generator.Membership(x, y)
+		ELSE errorFlag := TRUE
+		END
+	END;
+	IF errorFlag THEN
+		Error('Invalid comparison'); MakeIntConst(y);
+		MakeIntConst(x); x.type := Base.boolType
 	END
 END expression;
 
 PROCEDURE StatementSequence;
+BEGIN
 END StatementSequence;
 
 (* -------------------------------------------------------------------------- *)
@@ -428,8 +448,8 @@ BEGIN
 						Error('Proper procedure cannot have RETURN')
 					END;
 					NextSym; expression(x);
-					IF ~CompatibleType(x.type, proc.type.base) THEN
-						Error(notCompatibleType)
+					IF ~CompType(x.type, proc.type.base) THEN
+						Error(notCompTypeError)
 					END
 				ELSIF proc.type.base # NIL THEN
 					Error('Function procedure need RETURN clause')
@@ -460,16 +480,13 @@ BEGIN
 		SymTable.Init(modid); Generator.Init;
 		(* IF sym = Scanner.import THEN ImportList END; *)
 		IF Scanner.errcnt = 0 THEN
-			varsize := 0; DeclarationSequence(varsize);
-			
+			varsize := 0; DeclarationSequence(varsize);		
 			Generator.Enter;
 			IF sym = Scanner.begin THEN NextSym; StatementSequence END;
-			Generator.Return;
-			
+			Generator.Return;		
 			Check(Scanner.end, noEndError);
 			IF sym = Scanner.ident THEN
-				IF modid # Scanner.id THEN Error('Wrong module name')
-				END;
+				IF modid # Scanner.id THEN Error('Wrong module name') END;
 				NextSym
 			ELSE Error('No module identifier')
 			END;
