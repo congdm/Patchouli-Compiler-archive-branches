@@ -34,7 +34,6 @@ TYPE
 	
 VAR
 	sym*: INTEGER;
-	isQualident: BOOLEAN;
 	undefList: UndefPtrList;
 	defObj: Base.Object;
 	
@@ -72,8 +71,13 @@ BEGIN CheckInt(x);
 	END
 END CheckArrayLen;
 
-PROCEDURE CompatibleType(xtype, ytype: Base.Type): BOOLEAN;
-	RETURN TRUE
+PROCEDURE CompatibleType(t1, t2: Base.Type): BOOLEAN;
+	RETURN (t1 = t2)
+	OR (t1.form = Base.tArray) & (t2.form = Base.tArray)
+		& (t1.base = t2.base) & (t1.len = t2.len)
+	OR (t1.form = Base.tNPointer) & (t2.form = Base.tNPointer)
+		& (t1.base = t2.base)
+	OR (t1.form IN {Base.tNPointer, Base.tProcedure}) & (t2 = Base.nilType)
 END CompatibleType;
 
 (* -------------------------------------------------------------------------- *)
@@ -81,11 +85,24 @@ END CompatibleType;
 
 PROCEDURE qualident(VAR obj: Base.Object);
 BEGIN
+	SymTable.Find(obj, Scanner.id)
 END qualident;
 
 PROCEDURE expression(VAR x: Base.Item);
+	VAR y: Base.Item;
+		xform: INTEGER;
 BEGIN
-	(* stub *)
+	SimpleExpression(x);
+	IF (sym >= Scanner.eql) OR (sym <= Scanner.geq) THEN
+		xform := x.type.form; NextSym; SimpleExpression(y);
+		IF xform = Base.tInt THEN
+			CheckInt(y); Generator.Compare(x, y, sym)
+		ELSIF xform = Base.tReal THEN
+			CheckReal(y); Generator.Compare(x, y, sym)
+		ELSIF (xform = Base.tArray) & (y.type.form 
+	ELSIF sym = Scanner.in THEN
+		NextSym; SimpleExpression(y);
+	END
 END expression;
 
 PROCEDURE StatementSequence;
@@ -103,7 +120,7 @@ BEGIN
 	WHILE sym = Scanner.comma DO NextSym;
 		IF sym = Scanner.ident THEN
 			SymTable.New(field, Scanner.id, Base.cField);
-			IF first = Base.guard THEN first := field END;
+			IF first = NIL THEN first := field END;
 			NextSym
 		ELSE Error(superfluousCommaError)
 		END
@@ -114,7 +131,7 @@ BEGIN
 		tp.align := fieldType.align
 	END;
 	field := first;
-	WHILE field # Base.guard DO
+	WHILE field # NIL DO
 		field.type := fieldType;
 		field.lev := SymTable.curLev;
 		field.val := n;
@@ -130,7 +147,7 @@ BEGIN
 	NextSym; off := tp.size; tp.size := 0; unionSize := 0;
 	tpAlign := tp.align; tp.align := 0;
 	prev := SymTable.topScope;
-	WHILE prev.next # Base.guard DO prev := prev.next END;
+	WHILE prev.next # NIL DO prev := prev.next END;
 	
 	IF sym = Scanner.bar THEN Error(superfluousBarError); NextSym END;
 	REPEAT
@@ -159,7 +176,7 @@ BEGIN
 	off := off + (-off) MOD tp.align; tp.size := off + unionSize;
 	IF tpAlign > tp.align THEN tp.align := tpAlign END;
 	field := prev.next;
-	WHILE field # Base.guard DO
+	WHILE field # NIL DO
 		field.val := field.val + off;
 		field := field.next
 	END;
@@ -200,7 +217,7 @@ BEGIN NextSym;
 				WHILE sym = Scanner.comma DO NextSym;
 					IF sym = Scanner.ident THEN
 						SymTable.New(obj, Scanner.id, cls); NextSym;
-						IF first = Base.guard THEN first := obj END
+						IF first = NIL THEN first := obj END
 					ELSE Error(superfluousCommaError)
 					END
 				END
@@ -220,7 +237,7 @@ BEGIN NextSym;
 				ronly := tp.form IN {Base.tArray, Base.tNRecord}
 			END;
 			obj := first;
-			WHILE obj # Base.guard DO
+			WHILE obj # NIL DO
 				obj.class := cls;
 				obj.readOnly := ronly;
 				obj.val := parblksize;
@@ -253,7 +270,7 @@ END FormalParameters;
 PROCEDURE NewProcedureType(VAR tp: Base.Type);
 BEGIN Base.NewType(tp, Base.tProcedure);
 	tp.size := Base.WordSize; tp.align := Base.WordSize;
-	tp.parblksize := 0; tp.nopar := 0; tp.fields := Base.guard;
+	tp.parblksize := 0; tp.nopar := 0;
 	IF sym = Scanner.lparen THEN FormalParameters(tp) END
 END NewProcedureType;
 
@@ -262,7 +279,7 @@ PROCEDURE type(VAR tp: Base.Type);
 		x: Base.Item;
 		tpArray: Base.Type;
 		undef: UndefPtrList;
-		tpName: Base.IdStr;
+		id: Base.IdStr;
 		
 	PROCEDURE CalculateArraySize(tp, tp2: Base.Type);
 	BEGIN
@@ -315,16 +332,19 @@ BEGIN (* type *)
 		NextSym; Check(Scanner.to, noToError);
 		Base.NewType(tp, Base.tNPointer); tp.base := Base.intType;
 		tp.size := Base.WordSize; tp.align := Base.WordSize;
-		IF sym = Scanner.ident THEN qualident(obj);
-			IF obj.class = Base.cType THEN
-				IF obj.type.form = Base.tNRecord THEN tp.base := obj.type
-				ELSE Error(notRecordTypeError)
+		IF sym = Scanner.ident THEN
+			id := Scanner.id; obj := SymTable.universe.next;
+			WHILE (obj # NIL) & (obj.id # id) DO obj := obj.next END;
+			IF obj # NIL THEN
+				IF obj.class = Base.cType THEN
+					IF obj.type.form = Base.tNRecord THEN tp.base := obj.type
+					ELSE Error(notRecordTypeError)
+					END
+				ELSE Error(notTypeError)
 				END
-			ELSIF (obj = Base.guard) & ~isQualident THEN
-				NEW(undef); undef.tp := tp; undef.name := obj.name;
+			ELSE NEW(undef); undef.tp := tp; undef.name := id;
 				undef.next := undefList; undefList := undef
-			ELSE Error(notTypeError)
-			END
+			END;
 		ELSIF sym = Scanner.record THEN type(tp.base)
 		END
 	ELSIF sym = Scanner.procedure THEN
@@ -347,7 +367,7 @@ BEGIN
 				Error(notConstError); MakeIntConst(x)
 			END;
 			SymTable.New(obj, id, x.mode);
-			IF obj # Base.guard THEN
+			IF obj # NIL THEN
 				obj.type := x.type; obj.val := x.a; obj.lev := x.lev
 			END;
 			Check(Scanner.semicolon, noSemicolonError)
@@ -370,14 +390,14 @@ BEGIN
 			WHILE sym = Scanner.comma DO NextSym;
 				IF sym = Scanner.ident THEN
 					SymTable.New(obj, Scanner.id, Base.cVar);
-					IF first = Base.guard THEN first := obj END;
+					IF first = NIL THEN first := obj END;
 					NextSym
 				ELSE Error(superfluousCommaError)
 				END
 			END;
 			Check(Scanner.colon, noColonError);
 			type(typ); obj := first;
-			WHILE obj # Base.guard DO
+			WHILE obj # NIL DO
 				obj.type := typ;
 				obj.lev := SymTable.curLev;
 				n := varsize - typ.size; n := n - n MOD typ.align;
@@ -391,13 +411,13 @@ BEGIN
 	WHILE sym = Scanner.procedure DO NextSym;
 		IF sym = Scanner.ident THEN id := Scanner.id;
 			SymTable.New(proc, id, Base.cProc);
-			IF proc # Base.guard THEN
+			IF proc # NIL THEN
 				NextSym; NewProcedureType(proc.type);
 				Check(Scanner.semicolon, noSemicolonError);
 				SymTable.OpenScope(id); param := proc.type.fields;
-				WHILE param # Base.guard DO
+				WHILE param # NIL DO
 					SymTable.New(obj, param.name, Base.cVar);
-					obj^ := param^; obj.next := Base.guard;
+					obj^ := param^; obj.next := NIL;
 					param := param.next
 				END;
 				DeclarationSequence(locblksize);

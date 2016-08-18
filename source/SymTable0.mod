@@ -18,20 +18,33 @@ PROCEDURE OpenScope*(name: Base.IdStr);
 	VAR scope: Base.Object;
 BEGIN
 	NEW(scope); scope.class := Base.cHead; scope.name := name;
-	scope.next := Base.guard; scope.dsc := topScope; topScope := scope
+	scope.next := NIL; scope.dsc := topScope; topScope := scope
 END OpenScope;
 
 PROCEDURE CloseScope*;
 BEGIN topScope := topScope.dsc
 END CloseScope;
+
+PROCEDURE Find*(VAR obj: Base.Object; id: IdStr);
+	VAR p: Base.Object;
+BEGIN
+	p := topScope.next; WHILE (p # NIL) & (p.name # id) DO p := p.next END;
+	IF (p = NIL) & (topScope # universe) THEN
+		IF id # topScope.name THEN p := universe.next
+		ELSE p := topScope.dsc.next
+		END;
+		WHILE (p # NIL) & (p.name # id) DO p := p.next END
+	END;
+	obj := p; IF p = NIL THEN Scanner.Mark('Undefined identifier') END
+END Find;
+
+PROCEDURE New*(VAR obj: Base.Object; id: Base.IdStr; cls: INTEGER);
+END New;
 	
 PROCEDURE Init*(modid: Base.IdStr);
 BEGIN
 	topScope := NIL; OpenScope(''); universe := topScope
 END Init;
-
-PROCEDURE New*(VAR obj: Base.Object; id: Base.IdStr; cls: INTEGER);
-END New;
 	
 BEGIN
 END SymTable0.

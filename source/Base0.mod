@@ -51,8 +51,8 @@ TYPE
 	END;
 	
 VAR
-	guard*: Object;
 	intType*: Type;
+	nilType*: Type;
 	
 PROCEDURE NewType*(VAR tp: Type; form: INTEGER);
 END NewType;
