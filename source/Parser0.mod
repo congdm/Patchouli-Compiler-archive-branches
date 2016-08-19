@@ -22,7 +22,6 @@ CONST
 	notFieldListError = 'Not a field list';
 	notRecordTypeError = 'Not a record type';
 	notCompTypeError = 'Not compatible type';
-	invalidCompareError = 'Invalid comparison';
 	
 	superfluousCommaError = 'Superfluous ,';
 	superfluousSemicolonError = 'Superfluous ;';
@@ -90,25 +89,54 @@ BEGIN
 	SymTable.Find(obj, Scanner.id)
 END qualident;
 
+PROCEDURE term(VAR x: Base.Item)
+
 PROCEDURE SimpleExpression(VAR x: Base.Item);
-BEGIN
+	VAR y: Base.Item;
+		op, xform, yform: INTEGER;
+		errorFlag: BOOLEAN;
+BEGIN errorFlag := FALSE;
+	IF sym = Scanner.plus THEN NextSym; term(x)
+	ELSIF sym = Scanner.minus THEN NextSym; term(x); Generator.Negate(x)
+	ELSE term(x)
+	END;
+	xform := x.type.form;
+	IF (sym >= Scanner.plus) & (sym <= Scanner.minus) THEN
+		Generator.LoadVolatile(x); op := sym;
+		NextSym; term(y); yform := y.type.form;
+		IF (xform = {Base.tInteger, Base.tSet}) & (xform = yform)
+		OR (xform = Base.tReal) & (x.type = y.type)
+		THEN Generator.AddOp(x, y, op)
+		ELSE errorFlag := TRUE
+		END
+	ELSIF sym = Scanner.or THEN
+		IF xform = Base.tBoolean THEN Generator.Or1(x) END;
+		NextSym; term(y); yform := y.type.form;
+		IF (xform = Base.tBoolean) & (yform = Base.tBoolean) THEN
+			Generator.Or2(x, y)
+		ELSE errorFlag := TRUE
+		END
+	END;
+	IF errorFlag THEN
+		Error('Invalid simple expression');
+		MakeIntConst(y); MakeIntConst(x)
+	END
 END SimpleExpression;
 
 PROCEDURE expression(VAR x: Base.Item);
 	VAR y: Base.Item;
-		xform, yform: INTEGER;
+		xform, yform, rel: INTEGER;
 		errorFlag: BOOLEAN;
 BEGIN
 	SimpleExpression(x); xform := x.type.form; errorFlag := FALSE;
 	IF (sym >= Scanner.eql) OR (sym <= Scanner.geq) THEN
-		NextSym; SimpleExpression(y); yform := y.type.form;
-		IF (xform IN Base.typeComparable1) & (xform = yform)
+		rel := sym; NextSym; SimpleExpression(y); yform := y.type.form;
+		IF (xform IN {Base.tInteger, Base.tChar}) & (xform = yform)
+		OR (xform = Base.tReal) & (x.type = y.type)
 		OR (xform IN Base.typeComparable2)
-			& (sym <= Scanner.neq) & CompType(x.type, y.type)
-		THEN Generator.Compare(x, y, sym)
-		ELSIF (xform = Base.tArray) & (x.type.base.form = Base.tChar)
-			& (yform = Base.tArray) & (y.type.base.form = Base.tChar)
-		THEN Generator.StrCompare(x, y, sym)
+			& (rel <= Scanner.neq) & CompType(x.type, y.type)
+		THEN Generator.Compare(x, y, rel)
+		ELSIF IsString(x) & IsString(y) THEN Generator.StrCompare(x, y, rel)
 		ELSE errorFlag := TRUE
 		END
 	ELSIF sym = Scanner.in THEN
@@ -119,7 +147,7 @@ BEGIN
 		END
 	END;
 	IF errorFlag THEN
-		Error('Invalid comparison'); MakeIntConst(y);
+		Error('Invalid expression'); MakeIntConst(y);
 		MakeIntConst(x); x.type := Base.boolType
 	END
 END expression;
