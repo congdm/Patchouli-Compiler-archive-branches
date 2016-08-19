@@ -25,7 +25,7 @@ PROCEDURE CloseScope*;
 BEGIN topScope := topScope.dsc
 END CloseScope;
 
-PROCEDURE Find*(VAR obj: Base.Object; id: IdStr);
+PROCEDURE Find*(VAR obj: Base.Object; id: Base.IdStr);
 	VAR p: Base.Object;
 BEGIN
 	p := topScope.next; WHILE (p # NIL) & (p.name # id) DO p := p.next END;

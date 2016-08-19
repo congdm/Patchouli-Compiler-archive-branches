@@ -55,6 +55,7 @@ TYPE
 	
 VAR
 	intType*: Type;
+	boolType*: Type;
 	nilType*: Type;
 	
 PROCEDURE NewType*(VAR tp: Type; form: INTEGER);

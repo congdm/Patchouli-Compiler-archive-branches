@@ -81,6 +81,11 @@ PROCEDURE CompType(t1, t2: Base.Type): BOOLEAN;
 	OR (t2.form IN {Base.tNPointer, Base.tProcedure}) & (t1 = Base.nilType)
 END CompType;
 
+PROCEDURE IsString(VAR x: Base.Item): BOOLEAN;
+	RETURN (x.type.form = Base.tArray) & (x.type.base.form = Base.tChar)
+	OR (x.type.form = Base.tString)
+END IsString;
+
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
@@ -89,7 +94,39 @@ BEGIN
 	SymTable.Find(obj, Scanner.id)
 END qualident;
 
-PROCEDURE term(VAR x: Base.Item)
+PROCEDURE factor(VAR x: Base.Item);
+END factor;
+
+PROCEDURE term(VAR x: Base.Item);
+	VAR y: Base.Item;
+		op, xform, yform: INTEGER;
+		errorFlag: BOOLEAN;
+BEGIN
+	errorFlag := FALSE; factor(x); xform := x.type.form;
+	IF (sym >= Scanner.times) & (sym <= Scanner.mod) THEN
+		Generator.LoadVolatile(x); op := sym;
+		NextSym; factor(y); yform := y.type.form;
+		IF (xform = Base.tInteger) & (yform = Base.tInteger) THEN
+			IF op = Scanner.times THEN Generator.IntMul(x, y)
+			ELSIF op = Scanner.div THEN Generator.IntDiv(x, y, TRUE)
+			ELSIF op = Scanner.mod THEN Generator.IntDiv(x, y, FALSE)
+			ELSE errorFlag := TRUE
+			END
+		ELSIF (xform = Base.tReal) & (y.type = x.type) & (op <= Scanner.rdiv)
+		THEN Generator.RealOp(x, y, op)
+		ELSIF (xform = Base.tSet) & (yform = Base.tSet) & (op <= Scanner.rdiv)
+		THEN Generator.SetOp(x, y, op)
+		ELSE errorFlag := TRUE
+		END
+	ELSIF sym = Scanner.and THEN
+		IF xform = Base.tBoolean THEN Generator.And1(x) END;
+		NextSym; term(y); yform := y.type.form;
+		IF (xform = Base.tBoolean) & (yform = Base.tBoolean) THEN
+			Generator.And2(x, y)
+		ELSE errorFlag := TRUE
+		END
+	END
+END term;
 
 PROCEDURE SimpleExpression(VAR x: Base.Item);
 	VAR y: Base.Item;
@@ -104,9 +141,12 @@ BEGIN errorFlag := FALSE;
 	IF (sym >= Scanner.plus) & (sym <= Scanner.minus) THEN
 		Generator.LoadVolatile(x); op := sym;
 		NextSym; term(y); yform := y.type.form;
-		IF (xform = {Base.tInteger, Base.tSet}) & (xform = yform)
-		OR (xform = Base.tReal) & (x.type = y.type)
-		THEN Generator.AddOp(x, y, op)
+		IF (xform = Base.tInteger) & (yform = Base.tInteger) THEN
+			Generator.IntAdd(x, y, op)
+		ELSIF (xform = Base.tReal) & (x.type = y.type) THEN
+			Generator.RealOp(x, y, op)
+		ELSIF (xform = Base.tSet) & (yform = Base.tSet) THEN
+			Generator.SetOp(x, y, op)
 		ELSE errorFlag := TRUE
 		END
 	ELSIF sym = Scanner.or THEN
@@ -382,7 +422,7 @@ BEGIN (* type *)
 		tp.size := Base.WordSize; tp.align := Base.WordSize;
 		IF sym = Scanner.ident THEN
 			id := Scanner.id; obj := SymTable.universe.next;
-			WHILE (obj # NIL) & (obj.id # id) DO obj := obj.next END;
+			WHILE (obj # NIL) & (obj.name # id) DO obj := obj.next END;
 			IF obj # NIL THEN
 				IF obj.class = Base.cType THEN
 					IF obj.type.form = Base.tNRecord THEN tp.base := obj.type
@@ -390,8 +430,10 @@ BEGIN (* type *)
 					END
 				ELSE Error(notTypeError)
 				END
-			ELSE NEW(undef); undef.tp := tp; undef.name := id;
+			ELSIF SymTable.curLev = 0 THEN
+				NEW(undef); undef.tp := tp; undef.name := id;
 				undef.next := undefList; undefList := undef
+			ELSE Error('Type not found, pointer base type must be global')
 			END;
 		ELSIF sym = Scanner.record THEN type(tp.base)
 		END
