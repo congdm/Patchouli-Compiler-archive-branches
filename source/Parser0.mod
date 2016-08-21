@@ -15,10 +15,10 @@ CONST
 	noToError = 'No TO';
 	noIdentError = 'Identifier expected';
 	noRParenError = 'No )';
+	noRBrakError = 'No ]';
 	
 	notConstError = 'Not a const';
 	notTypeError = 'Not a type';
-	notIntTypeError = 'Not an integer';
 	notFieldListError = 'Not a field list';
 	notRecordTypeError = 'Not a record type';
 	notCompTypeError = 'Not compatible type';
@@ -38,6 +38,7 @@ VAR
 	defObj: Base.Object;
 	
 	type0: PROCEDURE(VAR tp: Base.Type);
+	expression0: PROCEDURE(VAR x: Base.Item);
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -59,10 +60,17 @@ END NextSym;
 
 PROCEDURE CheckInt(VAR x: Base.Item);
 BEGIN
-	IF x.type.form # Base.tInteger THEN
-		Error(notIntTypeError); x.type := Base.intType
+	IF x.type.form # Base.tInt THEN
+		Error('Not integer'); x.type := Base.intType
 	END
 END CheckInt;
+
+PROCEDURE CheckBool(VAR x: Base.Item);
+BEGIN
+	IF x.type.form # Base.tBool THEN
+		Error('Not bool'); x.type := Base.boolType
+	END
+END CheckBool;
 
 PROCEDURE CheckArrayLen(VAR x: Base.Item);
 BEGIN CheckInt(x);
@@ -75,15 +83,16 @@ PROCEDURE CompType(t1, t2: Base.Type): BOOLEAN;
 	RETURN (t1 = t2)
 	OR (t1.form = Base.tArray) & (t2.form = Base.tArray)
 		& (t1.base = t2.base) & (t1.len = t2.len)
-	OR (t1.form = Base.tNPointer) & (t2.form = Base.tNPointer)
+	OR (t1.form = Base.tNPtr) & (t2.form = Base.tNPtr)
 		& (t1.base = t2.base)
-	OR (t1.form IN {Base.tNPointer, Base.tProcedure}) & (t2 = Base.nilType)
-	OR (t2.form IN {Base.tNPointer, Base.tProcedure}) & (t1 = Base.nilType)
+	OR (t1.form IN {Base.tNPtr, Base.tProc}) & (t2 = Base.nilType)
+	OR (t2.form IN {Base.tNPtr, Base.tProc}) & (t1 = Base.nilType)
 END CompType;
 
 PROCEDURE IsString(VAR x: Base.Item): BOOLEAN;
 	RETURN (x.type.form = Base.tArray) & (x.type.base.form = Base.tChar)
-	OR (x.type.form = Base.tString)
+	OR (x.type.form = Base.tStr)
+	OR (x.mode = Base.cConst) & (x.type.form = Base.tChar)
 END IsString;
 
 (* -------------------------------------------------------------------------- *)
@@ -94,7 +103,87 @@ BEGIN
 	SymTable.Find(obj, Scanner.id)
 END qualident;
 
+PROCEDURE ActualParameters(VAR x: Base.Item);
+END ActualParameters;
+
+PROCEDURE set(VAR x: Base.Item);
+END set;
+
+PROCEDURE designator(VAR x: Base.Item);
+	VAR obj, field: Base.Object;
+		idx: Base.Item;
+		id: Base.IdStr;
+		xform: INTEGER;
+BEGIN qualident(obj);
+	IF (obj # NIL) & (obj.class IN Base.clsValue) THEN
+		Generator.MakeItem(x, obj); xform := x.type.form;
+		WHILE sym = Scanner.period DO
+			IF (xform # Base.tNPtr) & (xform # Base.tNRec) THEN
+				Error('Not a pointer or record')
+			END;
+			NextSym;
+			IF sym = Scanner.ident THEN id := Scanner.id;
+				IF xform = Base.tNPtr THEN Generator.Deref(x) END;
+				IF xform = Base.tNRec THEN field := x.type.fields;
+					WHILE (field # NIL) & (field.name # id) DO
+						field := field.next
+					END;
+					IF field # NIL THEN Generator.Field(x, field)
+					ELSE Error('Field not found')
+					END
+				END;
+				NextSym
+			ELSE Error('No record field?')
+			END
+		ELSIF sym = Scanner.lbrak DO
+			IF xform # Base.tArray THEN Error('Not an array') END;
+			NextSym; expression0(idx); CheckInt(idx);
+			IF xform = Base.tArray THEN Generator.Index(x, idx) END;
+			WHILE sym = Scanner.comma DO
+				NextSym; expression0(idx); CheckInt(idx);
+				IF x.type.form = Base.tArray THEN Generator.Index(x, idx)
+				ELSE Error('Not a multi-dimensional array')
+				END
+			END;
+			Check(Scanner.rbrak, noRBrakError)
+		ELSIF sym = Scanner.arrow DO
+			IF xform = Base.tNPtr THEN Generator.Deref(x)
+			ELSE Error('Not a pointer')
+			END;
+			NextSym
+		END
+	ELSE Generator.MakeConst(x, Base.intType, 0); Error('Invalid designator')
+	END
+END designator;
+
 PROCEDURE factor(VAR x: Base.Item);
+BEGIN
+	IF sym = Scanner.int THEN
+		Generator.MakeConst(x, Base.intType, Scanner.ival)
+	ELSIF sym = Scanner.real THEN
+		Generator.MakeConst(x, Base.realType, Scanner.ival)
+	ELSIF sym = Scanner.char THEN
+		Generator.MakeConst(x, Base.charType, Scanner.ival)
+	ELSIF sym = Scanner.string THEN
+		Generator.MakeStr(x, Scanner.str, Scanner.slen, Scanner.ansiStr)
+	ELSIF sym = Scanner.nil THEN Generator.MakeConst(x, Base.nilType, 0)
+	ELSIF sym = Scanner.true THEN Generator.MakeConst(x, Base.boolType, 1)
+	ELSIF sym = Scanner.false THEN Generator.MakeConst(x, Base.boolType, 0)
+	ELSIF sym = Scanner.lbrace THEN set(x)
+	ELSIF sym = Scanner.ident THEN designator(x);
+		IF sym = Scanner.lparen THEN
+			IF (x.type.form = Base.tProc) & (x.type.base # NIL) THEN
+				ActualParameters(x); Generator.Call(x);
+				Generator.ReturnValue(x)
+			ELSE Error('Not a function procedure')
+			END
+		END
+	ELSIF sym = Scanner.lparen THEN
+		NextSym; expression0(x); Check(Scanner.rparen, noRParenError)
+	ELSIF sym = Scanner.not THEN
+		NextSym; factor(x); CheckBool(x); Generator.Not(x)
+	ELSE Error('Invalid factor')
+	END
 END factor;
 
 PROCEDURE term(VAR x: Base.Item);
@@ -106,7 +195,7 @@ BEGIN
 	IF (sym >= Scanner.times) & (sym <= Scanner.mod) THEN
 		Generator.LoadVolatile(x); op := sym;
 		NextSym; factor(y); yform := y.type.form;
-		IF (xform = Base.tInteger) & (yform = Base.tInteger) THEN
+		IF (xform = Base.tInt) & (yform = Base.tInt) THEN
 			IF op = Scanner.times THEN Generator.IntMul(x, y)
 			ELSIF op = Scanner.div THEN Generator.IntDiv(x, y, TRUE)
 			ELSIF op = Scanner.mod THEN Generator.IntDiv(x, y, FALSE)
@@ -119,12 +208,15 @@ BEGIN
 		ELSE errorFlag := TRUE
 		END
 	ELSIF sym = Scanner.and THEN
-		IF xform = Base.tBoolean THEN Generator.And1(x) END;
+		IF xform = Base.tBool THEN Generator.And1(x) END;
 		NextSym; term(y); yform := y.type.form;
-		IF (xform = Base.tBoolean) & (yform = Base.tBoolean) THEN
+		IF (xform = Base.tBool) & (yform = Base.tBool) THEN
 			Generator.And2(x, y)
 		ELSE errorFlag := TRUE
 		END
+	END;
+	IF errorFlag THEN
+		Error('Invalid term'); MakeIntConst(y); MakeIntConst(x)
 	END
 END term;
 
@@ -134,14 +226,18 @@ PROCEDURE SimpleExpression(VAR x: Base.Item);
 		errorFlag: BOOLEAN;
 BEGIN errorFlag := FALSE;
 	IF sym = Scanner.plus THEN NextSym; term(x)
-	ELSIF sym = Scanner.minus THEN NextSym; term(x); Generator.Negate(x)
+	ELSIF sym = Scanner.minus THEN NextSym; term(x);
+		IF x.type.form IN {Base.tInt, Base.tSet, Base.tReal} THEN
+			Generator.Negate(x)
+		ELSE Error('This type is not compatible with minus sign')
+		END
 	ELSE term(x)
 	END;
 	xform := x.type.form;
 	IF (sym >= Scanner.plus) & (sym <= Scanner.minus) THEN
 		Generator.LoadVolatile(x); op := sym;
 		NextSym; term(y); yform := y.type.form;
-		IF (xform = Base.tInteger) & (yform = Base.tInteger) THEN
+		IF (xform = Base.tInt) & (yform = Base.tInt) THEN
 			Generator.IntAdd(x, y, op)
 		ELSIF (xform = Base.tReal) & (x.type = y.type) THEN
 			Generator.RealOp(x, y, op)
@@ -150,9 +246,9 @@ BEGIN errorFlag := FALSE;
 		ELSE errorFlag := TRUE
 		END
 	ELSIF sym = Scanner.or THEN
-		IF xform = Base.tBoolean THEN Generator.Or1(x) END;
+		IF xform = Base.tBool THEN Generator.Or1(x) END;
 		NextSym; term(y); yform := y.type.form;
-		IF (xform = Base.tBoolean) & (yform = Base.tBoolean) THEN
+		IF (xform = Base.tBool) & (yform = Base.tBool) THEN
 			Generator.Or2(x, y)
 		ELSE errorFlag := TRUE
 		END
@@ -171,17 +267,17 @@ BEGIN
 	SimpleExpression(x); xform := x.type.form; errorFlag := FALSE;
 	IF (sym >= Scanner.eql) OR (sym <= Scanner.geq) THEN
 		rel := sym; NextSym; SimpleExpression(y); yform := y.type.form;
-		IF (xform IN {Base.tInteger, Base.tChar}) & (xform = yform)
+		IF (xform IN {Base.tInt, Base.tChar}) & (xform = yform)
 		OR (xform = Base.tReal) & (x.type = y.type)
-		OR (xform IN Base.typeComparable2)
-			& (rel <= Scanner.neq) & CompType(x.type, y.type)
+		OR (xform IN Base.typEql) & (rel <= Scanner.neq)
+			& CompType(x.type, y.type)
 		THEN Generator.Compare(x, y, rel)
 		ELSIF IsString(x) & IsString(y) THEN Generator.StrCompare(x, y, rel)
 		ELSE errorFlag := TRUE
 		END
 	ELSIF sym = Scanner.in THEN
 		NextSym; SimpleExpression(y); yform := y.type.form;
-		IF (xform = Base.tInteger) & (yform = Base.tSet) THEN
+		IF (xform = Base.tInt) & (yform = Base.tSet) THEN
 			Generator.Membership(x, y)
 		ELSE errorFlag := TRUE
 		END
@@ -322,7 +418,7 @@ BEGIN NextSym;
 					& (tp.size # 4) & (tp.size # 8)
 				THEN cls := Base.cRef
 				END;
-				ronly := tp.form IN {Base.tArray, Base.tNRecord}
+				ronly := tp.form IN {Base.tArray, Base.tNRec}
 			END;
 			obj := first;
 			WHILE obj # NIL DO
@@ -355,12 +451,12 @@ BEGIN NextSym;
 	END
 END FormalParameters;
 
-PROCEDURE NewProcedureType(VAR tp: Base.Type);
-BEGIN Base.NewType(tp, Base.tProcedure);
+PROCEDURE NewProcType(VAR tp: Base.Type);
+BEGIN Base.NewType(tp, Base.tProc);
 	tp.size := Base.WordSize; tp.align := Base.WordSize;
 	tp.parblksize := 0; tp.nopar := 0;
 	IF sym = Scanner.lparen THEN FormalParameters(tp) END
-END NewProcedureType;
+END NewProcType;
 
 PROCEDURE type(VAR tp: Base.Type);
 	VAR obj: Base.Object;
@@ -380,7 +476,7 @@ BEGIN (* type *)
 	tp := Base.intType;
 	IF sym = Scanner.ident THEN qualident(obj);
 		IF obj.class = Base.cType THEN
-			IF (obj # defObj) OR (obj.type.form = Base.tNPointer) THEN
+			IF (obj # defObj) OR (obj.type.form = Base.tNPtr) THEN
 				tp := obj.type
 			ELSE Error('Circular definition')
 			END
@@ -398,7 +494,7 @@ BEGIN (* type *)
 		Check(Scanner.of, noOfError);
 		type(tpArray.base); CalculateArraySize(tp, tpArray)
 	ELSIF sym = Scanner.record THEN NextSym;
-		Base.NewType(tp, Base.tNRecord); SymTable.OpenScope('');
+		Base.NewType(tp, Base.tNRec); SymTable.OpenScope('');
 		tp.size := 0; tp.align := 0;		
 		IF sym = Scanner.semicolon THEN
 			Error(superfluousSemicolonError); NextSym
@@ -418,14 +514,14 @@ BEGIN (* type *)
 		Check(Scanner.end, noEndError)
 	ELSIF sym = Scanner.pointer THEN
 		NextSym; Check(Scanner.to, noToError);
-		Base.NewType(tp, Base.tNPointer); tp.base := Base.intType;
+		Base.NewType(tp, Base.tNPtr); tp.base := Base.intType;
 		tp.size := Base.WordSize; tp.align := Base.WordSize;
 		IF sym = Scanner.ident THEN
 			id := Scanner.id; obj := SymTable.universe.next;
 			WHILE (obj # NIL) & (obj.name # id) DO obj := obj.next END;
 			IF obj # NIL THEN
 				IF obj.class = Base.cType THEN
-					IF obj.type.form = Base.tNRecord THEN tp.base := obj.type
+					IF obj.type.form = Base.tNRec THEN tp.base := obj.type
 					ELSE Error(notRecordTypeError)
 					END
 				ELSE Error(notTypeError)
@@ -438,7 +534,7 @@ BEGIN (* type *)
 		ELSIF sym = Scanner.record THEN type(tp.base)
 		END
 	ELSIF sym = Scanner.procedure THEN
-		NextSym; NewProcedureType(tp)
+		NextSym; NewProcType(tp)
 	END
 END type;
 
@@ -502,7 +598,7 @@ BEGIN
 		IF sym = Scanner.ident THEN id := Scanner.id;
 			SymTable.New(proc, id, Base.cProc);
 			IF proc # NIL THEN
-				NextSym; NewProcedureType(proc.type);
+				NextSym; NewProcType(proc.type);
 				Check(Scanner.semicolon, noSemicolonError);
 				SymTable.OpenScope(id); param := proc.type.fields;
 				WHILE param # NIL DO
@@ -567,5 +663,6 @@ BEGIN
 END Module;
 
 BEGIN
-	type0 := type
+	type0 := type;
+	expression0 := expression
 END Parser0.

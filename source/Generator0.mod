@@ -2,8 +2,22 @@ MODULE Generator0;
 
 IMPORT
 	Base := Base0,
-	Scanner,
+	Scanner := Scanner0,
 	SymTable := SymTable0;
+	
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE MakeItem*(VAR x: Base.Item; obj: Base.Object);
+END MakeItem;
+
+PROCEDURE MakeConst*(VAR x: Base.Item; tp: Base.Type; val: INTEGER);
+END MakeConst;
+
+PROCEDURE MakeStr*(
+	VAR x: Base.Item; str: Base.String; slen: INTEGER; ansi: BOOLEAN
+);
+END MakeStr;
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -13,6 +27,9 @@ END LoadVolatile;
 
 PROCEDURE Negate*(VAR x: Base.Item);
 END Negate;
+
+PROCEDURE Not*(VAR x: Base.Item);
+END Not;
 
 PROCEDURE IntAdd*(VAR x, y: Base.Item; op: INTEGER);
 END IntAdd;
@@ -49,6 +66,27 @@ END StrCompare;
 
 PROCEDURE Membership*(VAR x, y: Base.Item);
 END Membership;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE Deref*(VAR x: Base.Item);
+END Deref;
+
+PROCEDURE Field*(VAR x: Base.Item; field: Base.Object);
+END Field;
+
+PROCEDURE Index*(VAR x, idx: Base.Item);
+END Index;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE Call*(VAR x: Base.Item);
+END Call;
+
+PROCEDURE ReturnValue*(VAR x: Base.Item);
+END ReturnValue;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
