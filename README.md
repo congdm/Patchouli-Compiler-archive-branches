@@ -10,6 +10,16 @@ The old version is written in Component Pascal, compiled by Gardens Point Compon
 
 Binary is also supply with source.
 
+## Updated 23/08/2016 - Rewrite the compiler again
+
+Everytime I went against Prof. Wirth teaching, everytime I regretted my decision.
+
+Modify the Oberon-07 language for the sake of adapting with the host system was a big mistake. A language is designed with a clear purpose at the beginning. However, when coping with other systems' requirements, we will make the language needlessly complicated. Complex language, complex model, etc. are great for building fancy things, but totally unsuitable for reliable operation.
+
+More complex = more affected by noise and error in real world.
+
+A good solution would be: let each language focus only one thing and using a common interface/protocol when interaction is needed. The desire for one omnipotent language which can do everything must be discarded.
+
 ## Personal ranting
 
 * [Niklaus Wirth was right after all](https://github.com/congdm/AyaCompiler/wiki/Niklaus-Wirth-was-right-after-all)
