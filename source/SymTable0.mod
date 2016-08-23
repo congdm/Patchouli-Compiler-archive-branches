@@ -3,10 +3,6 @@ MODULE SymTable0;
 IMPORT
 	Base := Base0, Scanner := Scanner0;
 	
-CONST
-	normalModule = 0;
-	lowLevelModule = 1;
-	
 VAR
 	curLev*: INTEGER;
 	universe*, topScope*: Base.Object;
@@ -35,7 +31,7 @@ BEGIN
 		END;
 		WHILE (p # NIL) & (p.name # id) DO p := p.next END
 	END;
-	obj := p; IF p = NIL THEN Scanner.Mark('Undefined identifier') END
+	obj := p
 END Find;
 
 PROCEDURE New*(VAR obj: Base.Object; id: Base.IdStr; cls: INTEGER);

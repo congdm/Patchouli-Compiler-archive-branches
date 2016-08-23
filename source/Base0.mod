@@ -1,11 +1,11 @@
 MODULE Base0;
 
 CONST
-	WordSize* = 8; CharSize* = 2; MaxChar* = 65535; SetUpperLimit* = 64;
+	WordSize* = 8; CharSize* = 2; MaxChar* = 65535; MaxSet* = 64;
 	MaxInt* = 9223372036854775807; MinInt* = -MaxInt - 1;
 	MaxIdLen* = 63; MaxStrLen* = 255;
-	MaxExtension* = 8; MaxRecordTypes* = 512;
-	MaxModules* = 256; MaxExportTypes* = 1024;
+	MaxExt* = 8; MaxRecTypes* = 512;
+	MaxImpMod* = 256; MaxExpTypes* = 1024;
 	
 	(* Object class/Item mode *)
 	cHead* = 0; cModule* = 1; cVar* = 2; cRef* = 3; cConst* = 4;
@@ -19,9 +19,8 @@ CONST
 	tInt* = 0; tBool* = 1; tSet* = 2; tChar* = 3;
 	tReal* = 4; tPtr* = 5; tProc* = 6;
 	tArray* = 7; tRec* = 8; tStr* = 9; tNil* = 10;
-	tNPtr* = 11; tNRec* = 12;
 	
-	typEql* = {tBool, tSet, tPtr, tProc, tNil, tNPtr};
+	typEql* = {tBool, tSet, tPtr, tProc, tNil};
 
 TYPE
 	IdStr* = ARRAY MaxIdLen+1 OF CHAR;
@@ -53,11 +52,7 @@ TYPE
 	END;
 	
 VAR
-	intType*: Type;
-	realType*: Type;
-	charType*: Type;
-	boolType*: Type;
-	nilType*: Type;
+	intType*, realType*, charType*, boolType*, nilType*: Type;
 	
 PROCEDURE NewType*(VAR tp: Type; form: INTEGER);
 END NewType;

@@ -8,6 +8,13 @@ IMPORT
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
+PROCEDURE FitInReg*(tp: Base.Type): BOOLEAN;
+	RETURN (tp.size = 1) & (tp.size = 2) & (tp.size = 4) & (tp.size = 8)
+END FitInReg;
+	
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
 PROCEDURE MakeItem*(VAR x: Base.Item; obj: Base.Object);
 END MakeItem;
 
@@ -61,11 +68,17 @@ END And2;
 PROCEDURE Compare*(VAR x, y: Base.Item; rel: INTEGER);
 END Compare;
 
+PROCEDURE RealCompare*(VAR x, y: Base.Item; rel: INTEGER);
+END RealCompare;
+
 PROCEDURE StrCompare*(VAR x, y: Base.Item; rel: INTEGER);
 END StrCompare;
 
 PROCEDURE Membership*(VAR x, y: Base.Item);
 END Membership;
+
+PROCEDURE TypeTest*(VAR x: Base.Item; tp: Base.Type; guard: BOOLEAN);
+END TypeTest;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
