@@ -73,6 +73,15 @@ BEGIN
 	END
 END CheckBool;
 
+PROCEDURE CheckVar(VAR x: Base.Item; readOnly: BOOLEAN);
+BEGIN
+	IF ~(x.mode IN Base.clsVariable) THEN
+		Error('Not a variable'); MakeIntConst(x);
+		x.mode := Base.cVar; x.a := 0; x.lev := 0; x.readOnly := FALSE
+	END;
+	IF ~readOnly & x.readOnly THEN Error('Read only variable') END
+END CheckVar;
+
 PROCEDURE CheckArrayLen(VAR x: Base.Item);
 BEGIN CheckInt(x);
 	IF x.mode # Base.cConst THEN Error(notConstError); x.a := 1
@@ -123,6 +132,7 @@ PROCEDURE CompType(t1, t2: Base.Type): BOOLEAN;
 	OR (t1.form = Base.tArray) & (t2.form = Base.tArray)
 		& (t1.base = t2.base) & (t1.len = t2.len)
 	OR (t1.form = Base.tPtr) & (t2.form = Base.tPtr) & IsExt(t2, t1)
+	OR (t1.form = Base.tRec) & (t2.form = Base.tRec) & IsExt(t2, t1)
 	OR (t1.form IN {Base.tPtr, Base.tProc}) & (t2 = Base.nilType)
 END CompType;
 
@@ -130,6 +140,64 @@ END CompType;
 PROCEDURE CompType2(t1, t2: Base.Type): BOOLEAN;
 	RETURN CompType(t1, t2) OR CompType(t2, t1)
 END CompType2;
+
+PROCEDURE CompArray(t1, t2: Base.Type): BOOLEAN;
+	RETURN (t1.base = t2.base)
+	OR IsOpenArray(t1.base) & (t2.base.form = Base.tArray)
+		& CompArray(t1.base, t2.base)
+END CompArray;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE Parameter(VAR c: Generator.CallItem);
+	VAR x: Base.Item; ftype: Base.Type; fpar: Base.Object;
+		xform: INTEGER; typeError: BOOLEAN;
+BEGIN expression0(x); INC(c.nact); typeError := FALSE;
+	IF c.nact <= c.nfpar THEN
+		fpar := c.fpar; ftype := fpar.type; xform := x.type.form;
+		IF fpar.class = Base.cVar THEN
+			IF CompType(ftype, x.type) THEN Generator.ValPar(x, c)
+			ELSE typeError := TRUE
+			END
+		ELSE CheckVar(x, fpar.readOnly);
+			IF (ftype.form = Base.tRec) & (xform = Base.tRec)
+				& IsExt(x.type, ftype) THEN
+				Generator.RecPar(x, c)
+			ELSIF x.type = ftype THEN Generator.RefPar(x, c)
+			ELSIF IsOpenArray(ftype) THEN
+				IF (xform = Base.tArray) & CompArray(ftype, x.type)
+				OR (ftype.base.form = Base.tChar) & (xform = Base.tStr) THEN
+					Generator.ArrayPar(x, c)
+				ELSIF ftype.base = Base.byteType THEN
+					Generator.ByteArrayPar(x, c)
+				ELSE typeError := TRUE
+				END
+			ELSIF (ftype.form = Base.tArray) & (ftype.base.form = Base.tChar)
+				& (xform = Base.tStr) THEN
+				Generator.RefPar(x, c)
+			ELSE typeError := TRUE
+			END
+		END;
+		IF typeError THEN Error(notCompTypeError); MakeIntConst(x) END;
+		c.fpar := c.fpar.next
+	ELSE MakeIntConst (x);
+		IF c.nact = c.nfpar + 1 THEN Error('Too many params') END
+	END
+END Parameter;
+
+PROCEDURE ActualParameters(VAR c: Generator.CallItem);
+BEGIN NextSym;
+	IF sym # Scanner.rparen THEN Parameter(c);
+		WHILE sym = Scanner.comma DO NextSym;
+			IF sym # Scanner.rparen THEN Parameter(c)
+			ELSE Error(superfluousCommaError)
+			END
+		END;
+		Check (Scanner.rparen, noRParenError)
+	ELSE NextSym
+	END
+END ActualParameters;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -139,12 +207,6 @@ BEGIN
 	SymTable.Find(obj, Scanner.id);
 	IF obj = NIL THEN Error('Undefined identifier') END
 END qualident;
-
-PROCEDURE ActualParameters(VAR x: Base.Item);
-END ActualParameters;
-
-PROCEDURE set(VAR x: Base.Item);
-END set;
 
 PROCEDURE TypeTest(VAR x: Base.Item; guard: BOOLEAN);
 	VAR obj: Base.Object;
@@ -218,14 +280,36 @@ BEGIN qualident(obj);
 		END;
 		IF valid THEN Generator.Deref(x) END; NextSym
 	ELSIF (sym = Scanner.lparen) & TypeTestable(x) DO
-		IF valid THEN NextSym; TypeTest(x, TRUE);
+		IF valid THEN NextSym; TypeTest(x, TRUE)
 		ELSE NextSym; IF sym = Scanner.ident THEN qualident(obj) END 
 		END;
 		Check(Scanner.rparen, noRParenError)
 	END
 END designator;
 
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE element(VAR x: Base.Item);
+	VAR y, z: Base.Item;
+BEGIN expression0(y); CheckInt(y);
+	IF sym = Scanner.upto THEN Generator.LoadVolatile(y);
+		NextSym; expression0(z); CheckInt(z); Generator.Set3(x, y, z)
+	ELSE Generator.Set2(x, y)
+	END
+END element;
+
+PROCEDURE set(VAR x: Base.Item);
+BEGIN NextSym; Generator.MakeConst(x, Base.setType, 0);
+	IF sym # Scanner.rbrace THEN element(x);
+		WHILE sym = Scanner.comma DO NextSym; element(x) END;
+		Generator.Set1(x); Check(Scanner.rbrace, 'No }')
+	ELSE NextSym
+	END
+END set;
+
 PROCEDURE factor(VAR x: Base.Item);
+	VAR c: Generator.CallItem;
 BEGIN
 	IF sym = Scanner.int THEN
 		Generator.MakeConst(x, Base.intType, Scanner.ival)
@@ -242,8 +326,8 @@ BEGIN
 	ELSIF sym = Scanner.ident THEN designator(x);
 		IF sym = Scanner.lparen THEN
 			IF (x.type.form = Base.tProc) & (x.type.base # NIL) THEN
-				ActualParameters(x); Generator.Call(x);
-				Generator.ReturnValue(x)
+				Generator.PrepareCall(x, c); ActualParameters(c);
+				Generator.Call(c); Generator.ReturnValue(x)
 			ELSE Error('Not a function procedure')
 			END
 		END

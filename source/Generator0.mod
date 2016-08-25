@@ -5,6 +5,13 @@ IMPORT
 	Scanner := Scanner0,
 	SymTable := SymTable0;
 	
+TYPE
+	CallItem* = RECORD
+		rtype*: Base.Type;
+		fpar*: Base.Object;
+		nact*, nfpar*: INTEGER
+	END;
+	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
@@ -83,6 +90,18 @@ END TypeTest;
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
+PROCEDURE Set1*(VAR x: Base.Item);
+END Set1;
+
+PROCEDURE Set2*(VAR x, y: Base.Item);
+END Set2;
+
+PROCEDURE Set3*(VAR x, y, z: Base.Item);
+END Set3;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
 PROCEDURE Deref*(VAR x: Base.Item);
 END Deref;
 
@@ -95,11 +114,29 @@ END Index;
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
-PROCEDURE Call*(VAR x: Base.Item);
+PROCEDURE PrepareCall*(VAR x: Base.Item; VAR c: CallItem);
+END PrepareCall;
+
+PROCEDURE Call*(VAR c: CallItem);
 END Call;
 
 PROCEDURE ReturnValue*(VAR x: Base.Item);
 END ReturnValue;
+
+PROCEDURE ValPar*(VAR x: Base.Item; VAR c: CallItem);
+END ValPar;
+
+PROCEDURE RefPar*(VAR x: Base.Item; VAR c: CallItem);
+END RefPar;
+
+PROCEDURE RecPar*(VAR x: Base.Item; VAR c: CallItem);
+END RecPar;
+
+PROCEDURE ArrayPar*(VAR x: Base.Item; VAR c: CallItem);
+END ArrayPar;
+
+PROCEDURE ByteArrayPar*(VAR x: Base.Item; VAR c: CallItem);
+END ByteArrayPar;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)

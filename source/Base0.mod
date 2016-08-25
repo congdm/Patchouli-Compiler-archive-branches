@@ -53,6 +53,7 @@ TYPE
 	
 VAR
 	intType*, realType*, charType*, boolType*, nilType*: Type;
+	byteType*, setType*: Type;
 	
 PROCEDURE NewType*(VAR tp: Type; form: INTEGER);
 END NewType;
