@@ -94,9 +94,8 @@ PROCEDURE IsOpenArray(tp: Base.Type): BOOLEAN;
 END IsOpenArray;
 
 PROCEDURE IsString(VAR x: Base.Item): BOOLEAN;
-	RETURN (x.type.form = Base.tArray) & (x.type.base.form = Base.tChar)
-	OR (x.type.form = Base.tStr)
-	OR (x.mode = Base.cConst) & (x.type.form = Base.tChar)
+	RETURN (x.type.form = Base.tStr)
+	OR (x.type.form = Base.tArray) & (x.type.base.form = Base.tChar)
 END IsString;
 
 PROCEDURE IsChar(VAR x: Base.Item): BOOLEAN;
@@ -209,8 +208,7 @@ BEGIN
 END qualident;
 
 PROCEDURE TypeTest(VAR x: Base.Item; guard: BOOLEAN);
-	VAR obj: Base.Object;
-		tp: Base.Type;
+	VAR obj: Base.Object; tp: Base.Type;
 BEGIN
 	IF sym = Scanner.ident THEN qualident(obj) ELSE Error('No type?') END;
 	IF noError THEN
@@ -228,11 +226,8 @@ BEGIN
 END TypeTest;
 
 PROCEDURE designator(VAR x: Base.Item);
-	VAR obj, fld: Base.Object;
-		idx: Base.Item;
-		id: Base.IdStr;
-		xform: INTEGER;
-		valid: BOOLEAN;
+	VAR obj, fld: Base.Object; idx: Base.Item; id: Base.IdStr;
+		xform: INTEGER; valid: BOOLEAN;
 BEGIN qualident(obj);
 	IF (obj # NIL) & (obj.class IN Base.clsValue) THEN
 		Generator.MakeItem(x, obj); xform := x.type.form; valid := TRUE
@@ -315,8 +310,6 @@ BEGIN
 		Generator.MakeConst(x, Base.intType, Scanner.ival)
 	ELSIF sym = Scanner.real THEN
 		Generator.MakeConst(x, Base.realType, Scanner.ival)
-	ELSIF sym = Scanner.char THEN
-		Generator.MakeConst(x, Base.charType, Scanner.ival)
 	ELSIF sym = Scanner.string THEN
 		Generator.MakeStr(x, Scanner.str, Scanner.slen, Scanner.ansiStr)
 	ELSIF sym = Scanner.nil THEN Generator.MakeConst(x, Base.nilType, 0)
@@ -421,8 +414,11 @@ BEGIN
 	SimpleExpression(x); xform := x.type.form; errorFlag := FALSE;
 	IF (sym = Scanner.eql) OR (sym <= Scanner.geq) THEN
 		rel := sym; NextSym; SimpleExpression(y); yform := y.type.form;
-		IF (xform = Base.tInt) & (yform = Base.tInt)
-		OR IsChar(x) & IsChar(y) THEN
+		IF (xform = Base.tInt) & (yform = Base.tInt) THEN
+			Generator.Compare(x, y, rel)
+		ELSIF IsChar(x) & IsChar(y) THEN
+			IF IsString(x) THEN Generator.StrToChar(x) END;
+			IF IsString(y) THEN Generator.StrToChar(x) END;
 			Generator.Compare(x, y, rel)
 		ELSIF (xform = Base.tReal) & (x.type = y.type) THEN
 			Generator.RealCompare(x, y, rel)
@@ -452,8 +448,45 @@ BEGIN
 	END
 END expression;
 
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
 PROCEDURE StatementSequence;
+	VAR x, y: Base.Item; c: Generator.CallItem;
+		xform: INTEGER;
 BEGIN
+	REPEAT (*sync*)
+		IF ~((sym = Scanner.ident) OR (sym >= Scanner.semicolon)
+			OR (sym >= Scanner.if) & (sym <= Scanner.for)) THEN
+			Error('Statement?');
+			REPEAT NextSym
+			UNTIL (sym = Scanner.ident) OR (sym >= Scanner.semicolon)
+		END;
+		IF sym = Scanner.ident THEN designator(x);
+			IF sym = Scanner.becomes THEN CheckVar(x, FALSE);
+				NextSym; expression(y); xform := x.type.form;
+				IF CompType(x.type, y.type) THEN
+					IF (xform # Base.tArray) & (xform # Base.tRec) THEN
+						Generator.Store(x, y)
+					ELSE Generator.StoreStruct(x, y)
+					END
+				ELSIF IsString(x) & IsString(y) THEN
+					Generator.CopyStr(x, y)
+				ELSIF (xform = Base.tArray) & IsOpenArray(y.type)
+					& (y.type.base = x.type.base) THEN
+					Generator.StoreStruct(x, y)
+				ELSIF IsChar(x) & IsChar(y) THEN
+					(* y is one char string *)
+					Generator.StrToChar(y); Generator.Store(x, y)
+				ELSE Error('Invalid assignment');
+					MakeIntConst(x); MakeIntConst(y)
+				END
+			ELSIF sym = Scanner.eql THEN
+				Error('Should be :='); NextSym; expression(y)
+			ELSIF xform = Base.tProc THEN
+				Geneator.PrepareCall(
+		END
+	UNTIL sym > Scanner.semicolon
 END StatementSequence;
 
 (* -------------------------------------------------------------------------- *)
