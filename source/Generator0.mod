@@ -12,6 +12,9 @@ TYPE
 		nact*, nfpar*: INTEGER
 	END;
 	
+VAR
+	pc*: INTEGER;
+	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
@@ -32,6 +35,42 @@ PROCEDURE MakeStr*(
 	VAR x: Base.Item; str: Base.String; slen: INTEGER; ansi: BOOLEAN
 );
 END MakeStr;
+
+PROCEDURE StrToChar*(VAR x: Base.Item);
+END StrToChar;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE FixLink*(L: INTEGER);
+END FixLink;
+
+PROCEDURE Fixup*(x: Base.Item);
+END Fixup;
+
+PROCEDURE FJump*(VAR L: INTEGER);
+END FJump;
+
+PROCEDURE CFJump*(VAR x: Base.Item);
+END CFJump;
+	
+PROCEDURE CBJump*(VAR x: Base.Item; L: INTEGER);
+END CBJump;
+  
+PROCEDURE BJump*(L: INTEGER);
+END BJump;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE Store*(VAR x, y: Base.Item);
+END Store;
+
+PROCEDURE StoreStruct*(VAR x, y: Base.Item);
+END StoreStruct;
+
+PROCEDURE CopyStr*(VAR x, y: Base.Item);
+END CopyStr;
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -110,6 +149,18 @@ END Field;
 
 PROCEDURE Index*(VAR x, idx: Base.Item);
 END Index;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE For1*(VAR z: Base.Item);
+END For1;
+
+PROCEDURE For2*(x, z: Base.Item; inc: INTEGER; VAR L2: INTEGER);
+END For2;
+
+PROCEDURE For3*(VAR x: Base.Item; inc, L, L2: INTEGER);
+END For3;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)

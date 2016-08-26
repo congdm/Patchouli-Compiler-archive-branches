@@ -16,10 +16,11 @@ CONST
 	noIdentError = 'Identifier expected';
 	noRParenError = 'No )';
 	noRBrakError = 'No ]';
+	noThenError = 'No THEN';
+	noDoError = 'No DO';
 	
 	notConstError = 'Not a const';
 	notTypeError = 'Not a type';
-	notFieldListError = 'Not a field list';
 	notRecordTypeError = 'Not a record type';
 	notCompTypeError = 'Not compatible type';
 	
@@ -106,6 +107,10 @@ END IsChar;
 PROCEDURE IsVarPar(VAR x: Base.Item): BOOLEAN;
 	RETURN (x.mode = Base.cRef) & ~x.readOnly
 END IsVarPar;
+
+PROCEDURE IsVarPar2(obj: Base.Object): BOOLEAN;
+	RETURN (obj.class = Base.cRef) & ~obj.readOnly
+END IsVarPar2;
 
 PROCEDURE TypeTestable(VAR x: Base.Item): BOOLEAN;
 	RETURN (x.type.form = Base.tPtr)
@@ -452,9 +457,22 @@ END expression;
 (* -------------------------------------------------------------------------- *)
 
 PROCEDURE StatementSequence;
-	VAR x, y: Base.Item; c: Generator.CallItem;
-		xform: INTEGER;
-BEGIN
+	VAR x, y, z, t: Base.Item; c: Generator.CallItem;
+		obj: Base.Object; orgtype: Base.Type;
+		xform, L, L2: INTEGER; makeDummyVar: BOOLEAN;
+		
+	PROCEDURE TypeCase(VAR x: Base.Item; VAR obj: Base.Object);
+		VAR tobj: Base.Object; tp: Base.Type;
+	BEGIN
+		Generator.MakeItem(x, obj); qualident(tobj); tp := tobj.type;
+		IF tobj.class # Base.cType THEN Error(notTypeError); tp := x.type END;
+		IF tp.form # x.type.form THEN Error(notCompTypeError); tp := x.type END;
+		IF ~IsExt(x.type, tp) THEN Error(notCompTypeError); tp := x.type END;
+		obj.type := tp; Generator.TypeTest(x, tp, FALSE); Generator.CFJump(x);
+		Check(Scanner.colon, noColonError); StatementSequence
+	END TypeCase;
+	
+BEGIN (* StatementSequence *)
 	REPEAT (*sync*)
 		IF ~((sym = Scanner.ident) OR (sym >= Scanner.semicolon)
 			OR (sym >= Scanner.if) & (sym <= Scanner.for)) THEN
@@ -484,36 +502,100 @@ BEGIN
 			ELSIF sym = Scanner.eql THEN
 				Error('Should be :='); NextSym; expression(y)
 			ELSIF xform = Base.tProc THEN
-				Geneator.PrepareCall(
+				IF x.type.base # NIL THEN Error('Not proper procedure') END;
+				Generator.PrepareCall(x, c);
+				IF (c.nfpar > 0) & (sym # Scanner.lparen) THEN
+					Error('No params?')
+				ELSIF sym = Scanner.lparen THEN ActualParameters(c)
+				END;
+				Generator.Call(c); MakeIntConst(x)
+			ELSE Error('Invalid statement')
+			END
+		ELSIF sym = Scanner.if THEN
+			L := 0; NextSym; expression(x); CheckBool(x); Generator.CFJump(x);
+			Check(Scanner.then, noThenError); StatementSequence;
+			WHILE sym = Scanner.elsif DO
+				Generator.FJump(L); Generator.FixLink(x.a);
+				NextSym; expression(x); CheckBool(x); Generator.CFJump(x);
+				Check(Scanner.then, noThenError); StatementSequence
+			END;			
+			IF sym = Scanner.else THEN
+				Generator.FJump(L); Generator.FixLink(x.a);
+				NextSym; StatementSequence
+			ELSE Generator.FixLink(x.a)
+			END;
+			Generator.FixLink(L); Check(Scanner.end, noEndError)
+		ELSIF sym = Scanner.while THEN
+			L := Generator.pc; NextSym; expression(x); CheckBool(x);
+			Generator.CFJump(x); Check(Scanner.do, noDoError);
+			StatementSequence;
+			WHILE sym = Scanner.elsif DO
+				Generator.BJump(L); Generator.FixLink(x.a);
+				NextSym; expression(x); CheckBool(x); Generator.CFJump(x);
+				Check(Scanner.do, noDoError); StatementSequence
+			END;
+			Generator.BJump(L); Generator.FixLink(x.a);
+			Check (Scanner.end, noEndError)
+		ELSIF sym = Scanner.repeat THEN
+			L := Generator.pc; NextSym; StatementSequence;
+			Check (Scanner.until, 'No UNTIL'); expression(x);
+			CheckBool(x); Generator.CBJump(x, L)
+		ELSIF sym = Scanner.for THEN NextSym; makeDummyVar := FALSE;
+			IF sym = Scanner.ident THEN
+				SymTable.Find(obj, Scanner.id); 
+				IF obj # NIL THEN
+					IF obj.class = Base.cModule THEN Error('Must be local') END;
+					Generator.MakeItem(x, obj); CheckVar(x, FALSE); CheckInt(x)
+				ELSE Error('Undefined identifier'); makeDummyVar := TRUE
+				END;
+				NextSym
+			ELSE Error(noIdentError); makeDummyVar := TRUE
+			END;
+			IF makeDummyVar THEN
+				x.mode := Base.cVar; x.type := Base.intType;
+				x.a := 0; x.lev := 0; x.readOnly := FALSE
+			END;
+			Check(Scanner.becomes, 'No :='); expression(y); CheckInt(y);
+			Generator.Store(x, y); Check(Scanner.to, noToError);
+			expression(z); CheckInt(z); Generator.For1(z);
+			IF sym = Scanner.by THEN
+				NextSym; expression(t); CheckInt(t);
+				IF t.mode # Scanner.const THEN
+					Scanner.Mark(notConstError); MakeIntConst(t)
+				END
+			ELSE Generator.MakeConst(t, Base.intType, 1)
+			END;
+			L := Generator.pc; Generator.For2(x, z, t.a, L2);
+			Check(Scanner.do, noDoError); StatementSequence;
+			Check(Scanner.end, noEndError); Generator.For3(x, t.a, L, L2)
+		ELSIF sym = Scanner.case THEN NextSym;
+			IF sym = Scanner.ident THEN
+				qualident(obj); Generator.MakeItem(t, obj);
+				IF (t.mode IN {Base.cVar, Base.cRef}) & TypeTestable(t) THEN
+					Check(Scanner.of, noOfError); orgtype := obj.type;
+					TypeCase(x, obj); obj.type := orgtype; L := 0;
+					WHILE sym = Scanner.bar DO NextSym;
+						IF sym = Scanner.ident THEN
+							Generator.FJump(L); Generator.Fixup(x);
+							TypeCase(x, obj); obj.type := orgtype
+						ELSE Error(superfluousBarError)
+						END
+					END;
+					Generator.Fixup(x); Generator.FixLink(L)
+				ELSE Error('Not pointer or record VAR param')
+				END;
+				Check(Scanner.end, noEndError)
+			ELSE Error(noIdentError)
+			END
+		END;
+		IF sym = Scanner.semicolon THEN NextSym
+		ELSIF sym < Scanner.semicolon THEN Error(noSemicolonError)
 		END
 	UNTIL sym > Scanner.semicolon
 END StatementSequence;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
-
-PROCEDURE FieldList(tp: Base.Type);
-	VAR first, field: Base.Object;
-		fieldType: Base.Type;
-		n: INTEGER;
-BEGIN SymTable.New(first, Scanner.id, Base.cField); NextSym;
-	WHILE sym = Scanner.comma DO NextSym;
-		IF sym = Scanner.ident THEN
-			SymTable.New(field, Scanner.id, Base.cField);
-			IF first = NIL THEN first := field END; NextSym
-		ELSE Error(superfluousCommaError)
-		END
-	END;
-	Check(Scanner.colon, noColonError); type0(fieldType);
-	n := tp.size; n := n + (-n) MOD fieldType.align; tp.size := n;
-	IF fieldType.align > tp.align THEN tp.align := fieldType.align END;
-	field := first;
-	WHILE field # NIL DO
-		field.type := fieldType; field.lev := SymTable.curLev;
-		field.val := n; n := n + fieldType.size; tp.size := n;
-		field := field.next
-	END;
-END FieldList;
 
 PROCEDURE FormalType(VAR tp: Base.Type);
 	VAR obj: Base.Object;
@@ -595,20 +677,39 @@ BEGIN
 	IF sym = Scanner.lparen THEN FormalParameters(tp) END
 END NewProcType;
 
+PROCEDURE FieldList(tp: Base.Type);
+	VAR first, field: Base.Object;
+		fieldType: Base.Type;
+		n: INTEGER;
+BEGIN SymTable.New(first, Scanner.id, Base.cField); NextSym;
+	WHILE sym = Scanner.comma DO NextSym;
+		IF sym = Scanner.ident THEN
+			SymTable.New(field, Scanner.id, Base.cField);
+			IF first = NIL THEN first := field END; NextSym
+		ELSE Error(superfluousCommaError)
+		END
+	END;
+	Check(Scanner.colon, noColonError); type0(fieldType);
+	n := tp.size; n := n + (-n) MOD fieldType.align; tp.size := n;
+	IF fieldType.align > tp.align THEN tp.align := fieldType.align END;
+	field := first;
+	WHILE field # NIL DO
+		field.type := fieldType; field.lev := SymTable.curLev;
+		field.val := n; n := n + fieldType.size; tp.size := n;
+		field := field.next
+	END;
+END FieldList;
+
+PROCEDURE CalculateArraySize(tp, tp2: Base.Type);
+BEGIN
+	IF tp # tp2 THEN CalculateArraySize(tp.base, tp2) END;
+	tp.size := tp.base.size * tp.len; tp.align := tp.base.align
+END CalculateArraySize;
+
 PROCEDURE type(VAR tp: Base.Type);
-	VAR obj: Base.Object;
-		x: Base.Item;
-		tpArray: Base.Type;
-		undef: UndefPtrList;
-		id: Base.IdStr;
-		
-	PROCEDURE CalculateArraySize(tp, tp2: Base.Type);
-	BEGIN
-		IF tp # tp2 THEN CalculateArraySize(tp.base, tp2) END;
-		tp.size := tp.base.size * tp.len; tp.align := tp.base.align
-	END CalculateArraySize;
-	
-BEGIN (* type *)
+	VAR obj: Base.Object; x: Base.Item; tpArray: Base.Type;
+		undef: UndefPtrList; id: Base.IdStr;	
+BEGIN
 	tp := Base.intType;
 	IF sym = Scanner.ident THEN qualident(obj);
 		IF obj.class = Base.cType THEN
