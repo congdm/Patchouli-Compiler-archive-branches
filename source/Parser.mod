@@ -343,7 +343,7 @@ BEGIN
 END qualident;
 
 PROCEDURE TypeTest (VAR x: Base.Item; guard: BOOLEAN);
-	VAR y: Base.Item;
+	VAR y: Base.Item; ptrType: Base.Type;
 BEGIN
 	Scanner.Get (sym); expression (y);
 	(* If x is bool, that means there is an error before *)
@@ -353,9 +353,10 @@ BEGIN
 				Scanner.Mark (notExtError); y.type := x.type
 			END;
 			IF y.type.form = Base.tPointer THEN
-				Generator.Make_item (y, y.type.base.obj)
+				ptrType := y.type; Generator.Make_item (y, y.type.base.obj)
+			ELSE ptrType := NIL
 			END;
-			Generator.Type_test (x, y, guard)
+			Generator.Type_test (x, y, guard, ptrType)
 		ELSE
 			IF y.mode = Base.cType THEN Scanner.Mark (notCompTypeError)
 			ELSE Scanner.Mark (notTypeError)
@@ -961,9 +962,11 @@ PROCEDURE StatementSequence;
 			END;
 			tp := y.type; obj.type := tp;
 			IF tp.form = Base.tPointer THEN
-				Generator.Make_item (y, tp.base.obj)
+				Generator.Make_item (y, tp.base.obj);
+				Generator.Type_test (x, y, FALSE, tp)
+			ELSE Generator.Type_test (x, y, FALSE, NIL)
 			END;
-			Generator.Type_test (x, y, FALSE); Generator.CFJump (x);
+			Generator.CFJump (x);
 			Check (Scanner.colon, noColonError); StatementSequence
 		ELSE Generator.Make_const (x, Base.boolType, 1); Generator.CFJump (x)
 		END
