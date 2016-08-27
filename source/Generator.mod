@@ -1476,7 +1476,7 @@ BEGIN
 	x.type := Base.boolType
 END Member_test;
 
-PROCEDURE Type_test* (VAR x, y: Base.Item; guard: BOOLEAN);
+PROCEDURE Type_test* (VAR x, y: Base.Item; guard: BOOLEAN; ptrType: Base.Type);
 	VAR xExtLev, yExtLev, td: INTEGER; td2: Base.Item;
 BEGIN
 	IF x.type.form = Base.tRecord THEN xExtLev := x.type.len
@@ -1484,7 +1484,8 @@ BEGIN
 	END;
 	yExtLev := y.type.len;
 	IF xExtLev >= yExtLev THEN
-		IF guard THEN x.type := y.type
+		IF guard THEN
+			IF ptrType = NIL THEN x.type := y.type ELSE x.type := ptrType END
 		ELSE
 			IF x.mode IN {mReg, mRegI} THEN Free_reg END;
 			Make_const (x, Base.boolType, 1)
@@ -1496,7 +1497,8 @@ BEGIN
 		Alloc_reg (td); EmitRegRm (MOVd, td, 8); td2 := y; Get_typedesc (td2);
 		Load_adr (td2); SetRmOperand_regI (td, yExtLev * 8);
 		EmitRegRm (CMP, td2.r, 8); Free_reg; Free_reg;
-		IF guard THEN Trap (ccNZ, type_trap); x.type := y.type
+		IF guard THEN Trap (ccNZ, type_trap);
+			IF ptrType = NIL THEN x.type := y.type ELSE x.type := ptrType END
 		ELSE
 			IF x.mode IN {mReg, mRegI} THEN Free_reg END;
 			Set_cond (x, ccZ); x.type := Base.boolType

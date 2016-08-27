@@ -58,6 +58,7 @@ BEGIN IF sym = expected THEN NextSym ELSE Error(err) END
 END Check;
 
 PROCEDURE MakeIntConst(VAR x: Base.Item);
+BEGIN Generator.CleanItem(x); Generator.MakeConst(x, Base.intType, 0)
 END MakeIntConst;
 
 PROCEDURE CheckInt(VAR x: Base.Item);
@@ -232,7 +233,7 @@ END TypeTest;
 
 PROCEDURE designator(VAR x: Base.Item);
 	VAR obj, fld: Base.Object; idx: Base.Item; id: Base.IdStr;
-		xform: INTEGER; valid: BOOLEAN;
+		recType: Base.Type; xform: INTEGER; valid: BOOLEAN;
 BEGIN qualident(obj);
 	IF (obj # NIL) & (obj.class IN Base.clsValue) THEN
 		Generator.MakeItem(x, obj); xform := x.type.form; valid := TRUE
@@ -250,11 +251,15 @@ BEGIN qualident(obj);
 		END;
 		IF valid THEN id := Scanner.id;
 			IF xform = Base.tPtr THEN Generator.Deref(x) END;
-			IF xform = Base.tRec THEN fld := x.type.fields;
-				WHILE (fld # NIL) & (fld.name # id) DO fld := fld.next END;
-				IF fld # NIL THEN Generator.Field(x, fld)
-				ELSE Error('Field not found'); valid := FALSE
-				END
+			IF xform = Base.tRec THEN recType := x.type;
+				REPEAT
+					fld := recType.fields;
+					WHILE (fld # NIL) & (fld.name # id) DO fld := fld.next END;
+					IF fld # NIL THEN Generator.Field(x, fld)
+					ELSE recType := recType.base;
+						IF recType = NIL THEN Error('Field not found') END
+					END
+				UNTIL (fld # NIL) OR (recType = NIL)
 			END;
 			NextSym
 		END

@@ -32,7 +32,7 @@ TYPE
 	TypeDesc* = RECORD
 		form*, len*, size*, align*: INTEGER;
 		nopar*, parblksize*: INTEGER;
-		fields*: Object;
+		fields*, obj: Object;
 		base*: Type
 	END;
 	
@@ -50,11 +50,22 @@ TYPE
 		a*, b*, c*, r*: INTEGER;
 		mode*, lev*: INTEGER
 	END;
-	
+
 VAR
 	intType*, realType*, charType*, boolType*, nilType*: Type;
 	byteType*, setType*: Type;
 	
+	topScope*, universe*: Scope;
+	
+PROCEDURE OpenScope*;
+	VAR scp: Scope;
+BEGIN NEW(scp); scp.dsc := topScope; topScope := scp
+END OpenScope;
+
+PROCEDURE CloseScope*;
+BEGIN topScope := topScope.dsc
+END CloseScope;
+
 PROCEDURE NewType*(VAR tp: Type; form: INTEGER);
 END NewType;
 
