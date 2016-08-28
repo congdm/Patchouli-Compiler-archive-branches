@@ -28,10 +28,7 @@ TYPE
 	Const* = POINTER TO EXTENSIBLE RECORD (ObjDesc) val*: INTEGER END;
 	Field* = POINTER TO EXTENSIBLE RECORD (ObjDesc) off*: INTEGER END;
 	Var* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
-		adr*, lev*: INTEGER; ronly*: BOOLEAN
-	END;
-	Ref* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
-		adr*, lev*: INTEGER; ronly*: BOOLEAN
+		adr*, lev*: INTEGER; ref*, ronly*: BOOLEAN
 	END;
 	
 	Ident* = POINTER TO RECORD name*: IdStr; obj*: Object; next*: Ident END;
@@ -46,10 +43,14 @@ TYPE
 		len*: INTEGER; base*: Type
 	END;
 	RecordType* = POINTER TO EXTENSIBLE RECORD (TypeDesc)
-		fields*: Field; lev*: INTEGER; base*: Type
+		fields*: Ident; lev*: INTEGER; base*: RecordType
 	END;
 	PointerType* = POINTER TO EXTENSIBLE RECORD (TypeDesc)
 		base*: RecordType
+	END;
+	ProcType* = POINTER TO EXTENSIBLE RECORD (TypeDesc)
+		parblksize*, nfpar*: INTEGER;
+		rtype*: Type; fpar*: Ident
 	END;
 
 VAR
@@ -304,9 +305,9 @@ END GetArg;
 PROCEDURE NewVar*(tp: Type; VAR varblksize: INTEGER): Var;
 	VAR v: Var; adr: INTEGER;
 BEGIN
-	NEW(v); v.isType := FALSE; v.type := tp;
+	NEW(v); v.isType := FALSE; v.type := tp; v.ref := FALSE; v.ronly := FALSE;
 	adr := -varblksize - tp.size; adr := adr - adr MOD tp.align;
-	v.adr := adr; varblksize := -adr;
+	v.adr := adr; v.lev := curLev; varblksize := -adr;
 	RETURN v
 END NewVar;
 
@@ -316,6 +317,102 @@ BEGIN
 	NEW(c); c.isType := FALSE; c.type := tp; c.val := val;
 	RETURN c
 END NewConst;
+
+PROCEDURE NewPar*(proc: ProcType; ref, ronly: BOOLEAN; tp: Type): Var;
+	VAR v: Var; parsize: INTEGER;
+BEGIN
+	IF ~ref & (tp.form IN {tArray, tRec}) THEN
+		ref := (tp.size # 1) & (tp.size # 2) & (tp.size # 4) & (tp.size # 8)
+	END;
+	IF ref & ~ronly & (tp.form = tRec)
+	OR (tp.form = tArray) & (tp(ArrayType).len = 0) THEN
+		parsize := WordSize * 2
+	ELSE parsize := WordSize
+	END;
+	NEW(v); v.isType := FALSE; v.type := tp;
+	v.adr := proc.parblksize; v.ref := ref; v.ronly := ronly;
+	proc.parblksize := proc.parblksize + parsize; INC(proc.nfpar);
+	RETURN v
+END NewPar;
+
+PROCEDURE NewField*(rec: RecordType; tp: Type): Field;
+	VAR fld: Field; off: INTEGER;
+BEGIN
+	NEW(fld); fld.isType := FALSE; fld.type := tp;
+	off := rec.size; off := off + (-off) MOD tp.align;
+	fld.off := off; rec.size := off + tp.size;
+	IF rec.align < tp.align THEN rec.align := tp.align END
+END NewField;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE InitNewType(tp: Type);
+BEGIN tp.align := 0; tp.size := 0
+END InitNewType;
+
+PROCEDURE NewArray*(len: INTEGER): ArrayType;
+	VAR tp: ArrayType;
+BEGIN
+	NEW(tp); InitNewType(tp);
+	tp.form := tArray; tp.len := len;
+	RETURN tp
+END NewArray;
+
+PROCEDURE CalculateArraySize*(arrType, lastArray: ArrayType);
+BEGIN
+	IF arrType # lastArray THEN
+		CalculateArraySize(arrType.base(ArrayType), lastArray)
+	END;
+	arrType.size := arrType.len * arrType.base.size;
+	IF arrType.align < arrType.base.align THEN
+		arrType.align := arrType.base.align
+	END
+END CalculateArraySize;
+
+PROCEDURE NewRecord*(): RecordType;
+	VAR tp: RecordType;
+BEGIN
+	NEW(tp); InitNewType(tp);
+	tp.form := tRec;
+	RETURN tp
+END NewRecord;
+
+PROCEDURE ExtendRecord*(recType: RecordType);
+BEGIN
+	recType.size := recType.base.size;
+	recType.align := recType.base.align;
+	recType.lev := recType.base.lev + 1
+END ExtendRecord;
+
+PROCEDURE NewPointer*(): PointerType;
+	VAR tp: PointerType;
+BEGIN
+	NEW(tp); InitNewType(tp); 
+	tp.form := tPtr; tp.size := WordSize; tp.align := WordSize;
+	RETURN tp
+END NewPointer;
+
+PROCEDURE NewProcType*(): ProcType;
+	VAR tp: ProcType;
+BEGIN
+	NEW(tp); InitNewType(tp); 
+	tp.form := tProc; tp.size := WordSize; tp.align := WordSize;
+	tp.parblksize := 0; tp.nfpar := 0;
+	RETURN tp
+END NewProcType;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE OpenScope*;
+	VAR scp: Scope;
+BEGIN NEW(scp); scp.dsc := topScope; topScope := scp
+END OpenScope;
+
+PROCEDURE CloseScope*;
+BEGIN topScope := topScope.dsc
+END CloseScope;
 	
 BEGIN
 	NEW(universe); topScope := universe; curLev := 0
