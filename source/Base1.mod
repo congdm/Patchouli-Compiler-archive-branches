@@ -15,6 +15,7 @@ CONST
 	tPtr* = 5; tProc* = 6; tArray* = 7; tRec* = 8; tStr* = 9; tNil* = 10;
 	
 	typEql* = {tBool, tSet, tPtr, tProc, tNil};
+	typCmp* = {tInt, tReal, tChar, tStr};
 
 TYPE
 	FileHandle* = RECORD handle: Kernel32.HANDLE END;
@@ -402,7 +403,7 @@ END OpenScope;
 PROCEDURE CloseScope*;
 BEGIN topScope := topScope.dsc
 END CloseScope;
-	
+
 BEGIN
 	NEW(universe); topScope := universe; curLev := 0
 END Base1.
