@@ -38,19 +38,10 @@ TYPE
 		op*: INTEGER; left*, right*: Object
 	END;
 	
-	TypeDesc* = EXTENSIBLE RECORD form*, size*, align*: INTEGER END;
-	ArrayType* = POINTER TO EXTENSIBLE RECORD (TypeDesc)
-		len*: INTEGER; base*: Type
-	END;
-	RecordType* = POINTER TO EXTENSIBLE RECORD (TypeDesc)
-		fields*: Ident; lev*: INTEGER; base*: RecordType
-	END;
-	PointerType* = POINTER TO EXTENSIBLE RECORD (TypeDesc)
-		base*: RecordType
-	END;
-	ProcType* = POINTER TO EXTENSIBLE RECORD (TypeDesc)
-		parblksize*, nfpar*: INTEGER;
-		rtype*: Type; fpar*: Ident
+	TypeDesc* = RECORD
+		form*, size*, align*: INTEGER;
+		len*: INTEGER; base*: Type; fields*: Ident;
+		parblksize*, nfpar*: INTEGER
 	END;
 
 VAR
@@ -351,18 +342,17 @@ PROCEDURE InitNewType(tp: Type);
 BEGIN tp.align := 0; tp.size := 0
 END InitNewType;
 
-PROCEDURE NewArray*(len: INTEGER): ArrayType;
-	VAR tp: ArrayType;
+PROCEDURE NewArray*(len: INTEGER): Type;
+	VAR tp: Type;
 BEGIN
-	NEW(tp); InitNewType(tp);
-	tp.form := tArray; tp.len := len;
+	NEW(tp); InitNewType(tp); tp.form := tArray; tp.len := len;
 	RETURN tp
 END NewArray;
 
-PROCEDURE CalculateArraySize*(arrType, lastArray: ArrayType);
+PROCEDURE CalculateArraySize*(arrType, lastArray: Type);
 BEGIN
 	IF arrType # lastArray THEN
-		CalculateArraySize(arrType.base(ArrayType), lastArray)
+		CalculateArraySize(arrType.base, lastArray)
 	END;
 	arrType.size := arrType.len * arrType.base.size;
 	IF arrType.align < arrType.base.align THEN
@@ -370,34 +360,33 @@ BEGIN
 	END
 END CalculateArraySize;
 
-PROCEDURE NewRecord*(): RecordType;
-	VAR tp: RecordType;
+PROCEDURE NewRecord*(): Type;
+	VAR tp: Type;
 BEGIN
-	NEW(tp); InitNewType(tp);
-	tp.form := tRec;
+	NEW(tp); InitNewType(tp); tp.form := tRec; tp.len := 0;
 	RETURN tp
 END NewRecord;
 
-PROCEDURE ExtendRecord*(recType: RecordType);
+PROCEDURE ExtendRecord*(recType: Type);
 BEGIN
 	recType.size := recType.base.size;
 	recType.align := recType.base.align;
-	recType.lev := recType.base.lev + 1
+	recType.len := recType.base.len + 1
 END ExtendRecord;
 
-PROCEDURE NewPointer*(): PointerType;
-	VAR tp: PointerType;
+PROCEDURE NewPointer*(): Type;
+	VAR tp: Type;
 BEGIN
-	NEW(tp); InitNewType(tp); 
+	NEW(tp); InitNewType(tp);
 	tp.form := tPtr; tp.size := WordSize; tp.align := WordSize;
 	RETURN tp
 END NewPointer;
 
-PROCEDURE NewProcType*(): ProcType;
-	VAR tp: ProcType;
+PROCEDURE NewProcType*(): Type;
+	VAR tp: Type;
 BEGIN
-	NEW(tp); InitNewType(tp); 
-	tp.form := tProc; tp.size := WordSize; tp.align := WordSize;
+	NEW(tp); InitNewType(tp); tp.form := tProc;
+	tp.size := WordSize; tp.align := WordSize;
 	tp.parblksize := 0; tp.nfpar := 0;
 	RETURN tp
 END NewProcType;

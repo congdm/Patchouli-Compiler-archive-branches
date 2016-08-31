@@ -93,12 +93,12 @@ BEGIN tp := B.intType;
 	ELSIF sym = S.array THEN
 		tp := B.NewArray(0); GetSym; Check0(S.of);
 		IF sym = S.array THEN Mark('Multi-dim open array not supported') END;
-		tp(B.ArrayType).base := FormalType()
+		tp.base := FormalType()
 	END;
 	RETURN tp
 END FormalType;
 
-PROCEDURE FPSection(proc: B.ProcType);
+PROCEDURE FPSection(proc: B.Type);
 	VAR ref, ronly: BOOLEAN;
 		first, ident: B.Ident; tp: B.Type;
 BEGIN ref := FALSE;
@@ -121,7 +121,7 @@ BEGIN ref := FALSE;
 	END
 END FPSection;
 
-PROCEDURE FormalParameters(proc: B.ProcType);
+PROCEDURE FormalParameters(proc: B.Type);
 	VAR ident: B.Ident; x: B.Object;
 BEGIN GetSym;
 	IF (sym = S.ident) OR (sym = S.var) THEN
@@ -131,12 +131,12 @@ BEGIN GetSym;
 			ELSE Mark('param section?')
 			END
 		END;
-		proc.fpar := B.topScope.first; B.CloseScope
+		proc.fields := B.topScope.first; B.CloseScope
 	END;
 	Check0(S.rparen);
 	IF sym = S.colon THEN GetSym; x := qualident();
 		IF (x # NIL) & x.isType THEN
-			IF ~(x.type.form IN {B.tArray, B.tRec}) THEN proc.rtype := x.type
+			IF ~(x.type.form IN {B.tArray, B.tRec}) THEN proc.base := x.type
 			ELSE Mark('invalid type')
 			END
 		ELSE Mark('not type')
@@ -144,19 +144,16 @@ BEGIN GetSym;
 	END
 END FormalParameters;
 
-PROCEDURE PointerType(defobj: B.Object): B.PointerType;
-	VAR ptrType: B.PointerType; ident: B.Ident; x: B.Object; t: B.Type;
+PROCEDURE PointerType(defobj: B.Object): B.Type;
+	VAR ptrType: B.Type; ident: B.Ident; x: B.Object;
 		undef: UndefPtrList;
 BEGIN
 	ptrType := B.NewPointer(); GetSym; Check0(S.to);
 	IF defobj # NIL THEN defobj.type := ptrType END;
 	IF sym = S.ident THEN ident := B.universe.first;
-		WHILE (ident # NIL) & (ident.name # S.id) DO
-			ident := ident.next
-		END;
+		WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
 		IF ident # NIL THEN x := ident.obj;
-			IF x.isType & (x.type.form = B.tRec) THEN
-				ptrType.base := x.type(B.RecordType)
+			IF x.isType & (x.type.form = B.tRec) THEN ptrType.base := x.type
 			ELSE Mark('not record type')
 			END
 		ELSIF B.curLev = 0 THEN
@@ -165,14 +162,13 @@ BEGIN
 		ELSE Mark('not found, must be global type')
 		END;
 		GetSym
-	ELSIF sym = S.record THEN t := type0(); ptrType.base := t(B.RecordType)
+	ELSIF sym = S.record THEN ptrType.base := type0()
 	ELSE Mark('base type?')
 	END
 END PointerType;
 
-PROCEDURE FieldList(rec: B.RecordType);
-	VAR first, field: B.Ident;
-		ft: B.Type;
+PROCEDURE FieldList(rec: B.Type);
+	VAR first, field: B.Ident; ft: B.Type;
 BEGIN
 	first := NewIdent(S.id); GetSym;
 	WHILE sym = S.comma DO GetSym;
@@ -189,21 +185,19 @@ BEGIN
 	END;
 END FieldList;
 
-PROCEDURE BaseType(): B.RecordType;
-	VAR btype: B.RecordType; p: B.PointerType; x: B.Object;
+PROCEDURE BaseType(): B.Type;
+	VAR btype, p: B.Type; x: B.Object;
 BEGIN
 	IF sym = S.ident THEN x := qualident();
 		IF x # NIL THEN
-			IF x.isType & (x.type.form = B.tRec) THEN
-				btype := x.type(B.RecordType)
-			ELSIF x.isType & (x.type.form = B.tPtr) THEN
-				p := x.type(B.PointerType);
+			IF x.isType & (x.type.form = B.tRec) THEN btype := x.type
+			ELSIF x.isType & (x.type.form = B.tPtr) THEN p := x.type;
 				IF p.base # NIL THEN btype := p.base
 				ELSE Mark('this type is not defined yet')
 				END
 			ELSE Mark('not record type')
 			END;
-			IF (btype # NIL) & (btype.lev >= B.MaxExt) THEN
+			IF (btype # NIL) & (btype.len >= B.MaxExt) THEN
 				Mark('max extension limit reached'); btype := NIL
 			END
 		END
@@ -219,43 +213,40 @@ BEGIN x := ConstExpression(); len := 1;
 END length;
 
 PROCEDURE type(): B.Type;
-	VAR tp, t: B.Type; x: B.Object; arrType, atyp: B.ArrayType;
-		recType: B.RecordType; ptrType: B.PointerType;
+	VAR tp, lastArr, t: B.Type; x: B.Object;
 		ident: B.Ident; len: INTEGER;
 BEGIN tp := B.intType;
 	IF sym = S.ident THEN x := qualident();
 		IF (x # NIL) & x.isType THEN tp := x.type ELSE Mark('not type') END
 	ELSIF sym = S.array THEN
-		GetSym; len := length(); arrType := B.NewArray(len);
-		atyp := arrType; tp := arrType;
+		GetSym; len := length(); tp := B.NewArray(len); lastArr := tp;
 		WHILE sym = S.comma DO GetSym;
 			IF sym <= S.ident THEN len := length();
-				atyp.base := B.NewArray(len); atyp := atyp.base(B.ArrayType)
+				lastArr.base := B.NewArray(len); lastArr := lastArr.base
 			ELSE Mark('remove ,')
 			END
 		END;
-		Check0(S.of); atyp.base := type();
-		B.CalculateArraySize(arrType, atyp)
+		Check0(S.of); lastArr.base := type(); B.CalculateArraySize(tp, lastArr)
 	ELSIF sym = S.record THEN
-		recType := B.NewRecord(); tp := recType; GetSym;
+		tp := B.NewRecord(); GetSym;
 		IF sym = S.lparen THEN
-			GetSym; recType.base := BaseType(); Check0(S.rparen);
-			IF recType.base # NIL THEN B.ExtendRecord(recType) END
+			GetSym; tp.base := BaseType(); Check0(S.rparen);
+			IF tp.base # NIL THEN B.ExtendRecord(tp) END
 		END;
 		B.OpenScope;
-		IF sym = S.ident THEN FieldList(recType);
+		IF sym = S.ident THEN FieldList(tp);
 			WHILE sym = S.semicolon DO GetSym;
-				IF sym = S.ident THEN FieldList(recType);
+				IF sym = S.ident THEN FieldList(tp);
 				ELSE Mark('no fieldlist, remove ;')
 				END
 			END
 		END;
-		recType.fields := B.topScope.first; B.CloseScope; Check0(S.end)
+		tp.fields := B.topScope.first; B.CloseScope; Check0(S.end)
 	ELSIF sym = S.pointer THEN
 		tp := PointerType(NIL)
 	ELSIF sym = S.procedure THEN
 		GetSym; tp := B.NewProcType();
-		IF sym = S.lparen THEN FormalParameters(tp(B.ProcType)) END
+		IF sym = S.lparen THEN FormalParameters(tp) END
 	ELSE Mark('no type?')
 	END;
 	RETURN tp
