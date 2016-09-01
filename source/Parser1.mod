@@ -69,6 +69,7 @@ PROCEDURE SamePars(p1, p2: B.Ident): BOOLEAN;
 			OR (p1.obj.type.form = B.tArray) & (p2.obj.type.form = B.tArray)
 				& (p1.obj.type.len = 0) & (p2.obj.type.len = 0)
 				& (p1.obj.type.base = p2.obj.type.base))
+		& SamePars(p1.next, p2.next)
 END SamePars;
 
 PROCEDURE SameProc(t1, t2: B.Type): BOOLEAN;
@@ -117,13 +118,29 @@ PROCEDURE expression(): B.Object;
 		xform, yform: INTEGER; errflag: BOOLEAN;
 BEGIN
 	x := SimpleExpression(); errflag := FALSE; xform := x.type.form;
-	IF (sym = S.eql) & (sym = S.neq) THEN
-		IF (xform IN B.typEql + B.typCmp) OR IsStr(x.type) THEN (*valid*)
-		ELSE Mark('invalid type'); errflag := TRUE;
-		END;
-		op := sym; GetSym; y := SimpleExpression(); yform := y.type.form;
-		IF ~CompTypes(x.type, y.type) & ~CompTypes(y.type, x.type) THEN
-			Mark('invalid expression'); errflag := TRUE;
+	IF (sym >= S.eql) & (sym <= S.in) THEN
+		IF sym <= S.neq THEN
+			IF (xform IN B.typEql + B.typCmp) OR IsStr(x.type) THEN (*valid*)
+			ELSE Mark('invalid type'); errflag := TRUE
+			END;
+			op := sym; GetSym; y := SimpleExpression(); yform := y.type.form;
+			IF ~CompTypes(x.type, y.type) & ~CompTypes(y.type, x.type) THEN
+				Mark('invalid expression'); errflag := TRUE
+			END
+		ELSIF (sym >= S.lss) & (sym <= S.geq) THEN
+			IF (xform IN B.typCmp) OR IsStr(x.type) THEN (*valid*)
+			ELSE Mark('invalid type'); errflag := TRUE;
+			END;
+			op := sym; GetSym; y := SimpleExpression(); yform := y.type.form;
+			IF ~CompTypes(x.type, y.type) & ~CompTypes(y.type, x.type) THEN
+				Mark('invalid expression'); errflag := TRUE
+			END
+		ELSIF sym = S.in THEN
+			IF xform # B.tInt THEN Mark('invalid type'); errflag := TRUE END;
+			op := sym; GetSym; y := SimpleExpression();
+			IF y.type.form # B.tSet THEN
+				Mark('invalid expression'); errflag := TRUE
+			END
 		END;
 		IF ~errflag THEN
 			IF IsConst(x) & IsConst(y) THEN x := G.FoldConst(op, x, y)
@@ -131,6 +148,8 @@ BEGIN
 			END
 		ELSE x := B.NewConst(B.boolType, 0)
 		END
+	ELSIF sym = S.is THEN
+		
 	END;
 	RETURN x
 END expression;
