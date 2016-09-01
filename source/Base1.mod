@@ -310,14 +310,14 @@ BEGIN
 	RETURN c
 END NewConst;
 
-PROCEDURE NewPar*(proc: ProcType; ref, ronly: BOOLEAN; tp: Type): Var;
+PROCEDURE NewPar*(proc: Type; ref, ronly: BOOLEAN; tp: Type): Var;
 	VAR v: Var; parsize: INTEGER;
 BEGIN
 	IF ~ref & (tp.form IN {tArray, tRec}) THEN
 		ref := (tp.size # 1) & (tp.size # 2) & (tp.size # 4) & (tp.size # 8)
 	END;
 	IF ref & ~ronly & (tp.form = tRec)
-	OR (tp.form = tArray) & (tp(ArrayType).len = 0) THEN
+	OR (tp.form = tArray) & (tp.len = 0) THEN
 		parsize := WordSize * 2
 	ELSE parsize := WordSize
 	END;
@@ -327,7 +327,7 @@ BEGIN
 	RETURN v
 END NewPar;
 
-PROCEDURE NewField*(rec: RecordType; tp: Type): Field;
+PROCEDURE NewField*(rec, tp: Type): Field;
 	VAR fld: Field; off: INTEGER;
 BEGIN
 	NEW(fld); fld.isType := FALSE; fld.type := tp;

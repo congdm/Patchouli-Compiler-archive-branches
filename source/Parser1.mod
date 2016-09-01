@@ -5,7 +5,7 @@ IMPORT
 	
 TYPE
 	UndefPtrList = POINTER TO RECORD
-		name: B.IdStr; tp: B.PointerType; next: UndefPtrList
+		name: B.IdStr; tp: B.Type; next: UndefPtrList
 	END;
 	
 VAR
@@ -87,6 +87,14 @@ PROCEDURE CompTypes(t1, t2: B.Type): BOOLEAN;
 	OR (t1.form = B.tProc) & (t2.form = B.tProc) & SameProc(t1, t2)
 END CompTypes;
 
+PROCEDURE IsVarPar(x: B.Object): BOOLEAN;
+	RETURN (x IS B.Var) & x(B.Var).ref & ~x(B.Var).ronly
+END IsVarPar;
+
+PROCEDURE IsConst(x: B.Object): BOOLEAN;
+	RETURN (x IS B.Const) OR (x IS B.Var) & (x.type.form = B.tStr)
+END IsConst;
+
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
@@ -113,9 +121,16 @@ PROCEDURE qualident(): B.Object;
 	RETURN NIL
 END qualident;
 
-PROCEDURE expression(): B.Object;
+PROCEDURE SimpleExpression(): B.Object;	
 	VAR x, y: B.Object;
-		xform, yform: INTEGER; errflag: BOOLEAN;
+BEGIN
+	
+	RETURN NIL
+END SimpleExpression;
+
+PROCEDURE expression(): B.Object;
+	VAR x, y: B.Object; tp: B.Type;
+		xform, yform, op: INTEGER; errflag: BOOLEAN;
 BEGIN
 	x := SimpleExpression(); errflag := FALSE; xform := x.type.form;
 	IF (sym >= S.eql) & (sym <= S.in) THEN
@@ -149,7 +164,20 @@ BEGIN
 		ELSE x := B.NewConst(B.boolType, 0)
 		END
 	ELSIF sym = S.is THEN
-		
+		IF (xform = B.tPtr) OR (xform = B.tRec) & IsVarPar(x) THEN (*valid*)
+		ELSE Mark('invalid type'); errflag := TRUE
+		END;
+		GetSym; y := qualident();
+		IF (y # NIL) & y.isType THEN tp := y.type;
+			IF (tp.form = B.tPtr) & (tp.base # NIL)
+			OR (tp.form = B.tRec) THEN (*valid*)
+			ELSE Mark('invalid type'); errflag := TRUE
+			END;
+		ELSE Mark('not type'); errflag := TRUE
+		END;
+		IF ~errflag THEN x := NewNode(S.is, x, y); x.type := B.boolType
+		ELSE x := B.NewConst(B.boolType, 0)
+		END
 	END;
 	RETURN x
 END expression;
