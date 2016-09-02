@@ -336,6 +336,10 @@ BEGIN
 	IF rec.align < tp.align THEN rec.align := tp.align END
 END NewField;
 
+PROCEDURE NewStr*(str: String; slen: INTEGER): Var;
+	RETURN NIL
+END NewStr;
+
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
