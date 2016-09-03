@@ -31,6 +31,9 @@ TYPE
 	Var* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
 		adr*, lev*: INTEGER; ref*, ronly*: BOOLEAN
 	END;
+	Proc* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
+		adr*, lev*: INTEGER; ref*: BOOLEAN
+	END;
 	
 	Ident* = POINTER TO RECORD name*: IdStr; obj*: Object; next*: Ident END;
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
@@ -339,6 +342,13 @@ END NewField;
 PROCEDURE NewStr*(str: String; slen: INTEGER): Var;
 	RETURN NIL
 END NewStr;
+
+PROCEDURE NewProc*(): Proc;
+	VAR p: Proc;
+BEGIN
+	NEW(p); p.isType := FALSE; p.lev := curLev; p.ref := FALSE
+	RETURN p
+END NewProc;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)

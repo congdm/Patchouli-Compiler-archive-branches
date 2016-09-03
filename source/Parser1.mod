@@ -38,6 +38,7 @@ BEGIN
 	ELSIF expect = S.to THEN Mark('No TO')
 	ELSIF expect = S.rparen THEN Mark('No )')
 	ELSIF expect = S.rbrak THEN Mark('No ]')
+	ELSIF expect = S.rbrace THEN Mark('No }')
 	ELSE ASSERT(FALSE)
 	END;
 END Check0;
@@ -124,7 +125,9 @@ BEGIN
 	IF B.topScope.first = NIL THEN B.topScope.first := ident
 	ELSE p := B.topScope.first;
 		WHILE (p.next # NIL) & (p.name # name) DO p := p.next END;
-		IF p.name = name THEN Mark('Ident already used'); ident := NIL END
+		IF p.name = name THEN Mark('Ident already used'); ident := NIL
+		ELSE p.next := ident
+		END
 	END;
 	RETURN ident
 END NewIdent;
@@ -141,7 +144,8 @@ PROCEDURE qualident(): B.Object;
 BEGIN ident := B.topScope.first;
 	WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
 	IF ident # NIL THEN x := ident.obj
-	ELSIF S.id = curProcIdent.name THEN x := curProcIdent.obj
+	ELSIF (curProcIdent # NIL) & (S.id = curProcIdent.name) THEN
+		x := curProcIdent.obj
 	ELSE ident := B.universe.first;
 		WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
 		IF ident # NIL THEN x := ident.obj
@@ -243,8 +247,31 @@ BEGIN x := qualident(); valid := TRUE;
 	RETURN x
 END designator;
 
+PROCEDURE element(): B.Object;
+	VAR x, y: B.Object;
+BEGIN
+	x := expression0(); CheckInt(x);
+	IF sym = S.upto THEN
+		y := expression0(); CheckInt(y); x := NewNode(S.upto, x, y)
+	END;
+	RETURN x
+END element;
+
 PROCEDURE set(): B.Object;
-	RETURN NIL (*stub*)
+	VAR x, t, u: B.Node;
+BEGIN x := NewNode(S.lbrace, NIL, NIL); GetSym;
+	IF sym # S.rbrace THEN
+		x.left := element(); t := x;
+		WHILE sym = S.comma DO
+			IF sym # S.rbrace THEN
+				u := NewNode(S.comma, NIL, NIL); t.right := u; t := u;
+				t.left := element()
+			ELSE Mark('remove ,')
+			END
+		END
+	END;
+	Check0(S.rbrace);
+	RETURN x
 END set;
 
 PROCEDURE factor(): B.Object;
@@ -548,7 +575,7 @@ BEGIN x := ConstExpression(); len := 1;
 END length;
 
 PROCEDURE type(): B.Type;
-	VAR tp, lastArr, t: B.Type; x: B.Object;
+	VAR tp, lastArr, t: B.Type; x: B.Object; proc: B.Proc;
 		ident: B.Ident; len: INTEGER;
 BEGIN tp := B.intType;
 	IF sym = S.ident THEN x := qualident();
@@ -588,7 +615,7 @@ BEGIN tp := B.intType;
 END type;
 
 PROCEDURE DeclarationSequence(VAR varblksize: INTEGER);
-	VAR first, ident: B.Ident; x: B.Object; tp: B.Type;
+	VAR first, ident, par: B.Ident; x: B.Object; tp: B.Type; varobj: B.Var;
 BEGIN
 	IF sym = S.const THEN GetSym;
 		WHILE sym = S.ident DO
@@ -624,6 +651,27 @@ BEGIN
 			END;
 		END
 	END;
+	IF S.errcnt = 0 THEN
+		WHILE sym = S.procedure DO GetSym;
+			IF sym = S.ident THEN
+				curProcIdent := NewIdent(S.id); GetSym;
+				proc := B.NewProc(); ident.obj := proc
+			ELSE curProcIdent := NIL; Mark('proc name?')
+			END;
+			tp := B.NewProcType();
+			IF sym = S.lparen THEN FormalParameters(tp) END;
+			Check0(S.semicolon);
+			IF proc # NIL THEN proc.type := tp END;
+			B.OpenScope; par := tp.fields;
+			WHILE par # NIL DO
+				ident := NewIdent(par.name); NEW(varobj); ident.obj := varobj;
+				varobj^ := par.obj(B.Var)^; par := par.next
+			END;
+			ident := curProcIdent; DeclarationSequence(locblksize);
+			curProcIdent := ident;
+			
+		END
+	END;
 END DeclarationSequence;
 
 PROCEDURE Module*;
@@ -632,6 +680,8 @@ PROCEDURE Module*;
 BEGIN GetSym; modid[0] := 0X;
 	IF sym = S.ident THEN modid := S.id; GetSym ELSE Missing(S.ident) END;
 	Check0(S.semicolon); DeclarationSequence(varblksize);
+	IF errcnt = 0 THEN
+	END
 END Module;
 	
 BEGIN
