@@ -94,6 +94,10 @@ PROCEDURE CompTypes(t1, t2: B.Type): BOOLEAN;
 	OR (t1.form = B.tProc) & (t2.form = B.tProc) & SameProc(t1, t2)
 END CompTypes;
 
+PROCEDURE CompTypes2(t1, t2: B.Type): BOOLEAN;
+	RETURN CompTypes(t1, t2) OR CompTypes(t2, t1)
+END CompTypes2;
+
 PROCEDURE IsVarPar(x: B.Object): BOOLEAN;
 	RETURN (x IS B.Var) & x(B.Var).ref & ~x(B.Var).ronly
 END IsVarPar;
@@ -109,8 +113,13 @@ END CheckInt;
 
 PROCEDURE CheckBool(x: B.Object);
 BEGIN
-	IF x.type # B.boolType THEN Mark('not int') END
+	IF x.type # B.boolType THEN Mark('not bool') END
 END CheckBool;
+
+PROCEDURE CheckSet(x: B.Object);
+BEGIN
+	IF x.type # B.setType THEN Mark('not set') END
+END CheckSet;
 
 PROCEDURE TypeTestable(x: B.Object): BOOLEAN;
 	RETURN (x.type.form = B.tPtr) & (x.type.base # NIL)
@@ -140,6 +149,25 @@ BEGIN
 		END
 	END
 END CheckPar;
+
+PROCEDURE CheckLeft(x: B.Object; op: INTEGER);
+	CONST ivlType = 'invalid type';
+BEGIN
+	IF (op >= S.eql) & (op <= S.geq) THEN
+		IF (x.type.form IN B.typCmp) OR IsStr(x.type)
+		OR (op <= S.neq) & (x.type.form IN B.typEql)
+		THEN (*valid*) ELSE Mark(ivlType)
+		END
+	ELSIF op = S.is THEN
+		IF TypeTestable(x) THEN (*valid*) ELSE Mark(ivlType) END
+	END
+END CheckLeft;
+
+PROCEDURE Check1(x: B.Object; forms: SET);
+	CONST ivlType = 'invalid type';
+BEGIN
+	IF ~(x.type.form IN forms) THEN Mark(ivlType) END
+END Check1;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -361,39 +389,16 @@ BEGIN
 END factor;
 
 PROCEDURE term(): B.Object;
-	VAR x, y: B.Object; xtype: B.Type;
-		xform, op: INTEGER; errflag: BOOLEAN;
-BEGIN
-	x := factor(); xform := x.type.form;
+	VAR x, y: B.Object; xtype: B.Type; op: INTEGER;
+BEGIN x := factor();
 	WHILE sym = S.times DO
-		xtype := x.type; xform := xtype.form;
-		IF xform IN {B.tInt, B.tReal, B.tSet} THEN (*valid*)
-		ELSE Mark('invalid type'); errflag := TRUE
-		END;
-		op := sym; GetSym; y := factor();
-		IF (y.type = xtype) OR (xform = B.tInt) & (y.type.form = B.tInt)
-		THEN (*valid*) ELSE Mark('invalid type'); errflag := TRUE
-		END;
-		x := NewNode(op, x, y);
-		IF ~errflag THEN
-			IF xform = B.tInt THEN x.type := B.intType
-			ELSE x.type := xtype
-			END
-		ELSE x.type := B.intType
-		END
+		Check1(x, {B.tInt, B.tReal, B.tSet}); GetSym; y := factor();
+		IF ~CompTypes(xtype, y.type) THEN Mark('invalid type') END;
+		xtype := x.type; x := NewNode(S.times, x, y); x.type := xtype
 	ELSIF sym = S.rdiv DO
-		xtype := x.type;
-		IF xtype.form IN {B.tReal, B.tSet} THEN (*valid*)
-		ELSE Mark('invalid type'); errflag := TRUE
-		END;
-		op := sym; GetSym; y := factor();
-		IF y.type = xtype THEN (*valid*)
-		ELSE Mark('invalid type'); errflag := TRUE
-		END;
-		x := NewNode(op, x, y);
-		IF ~errflag THEN x.type := xtype
-		ELSE x.type := B.realType
-		END
+		Check1(x, {B.tReal, B.tSet}); GetSym; y := factor();
+		IF ~CompTypes(xtype, y.type) THEN Mark('invalid type') END;
+		xtype := x.type; x := NewNode(S.times, x, y); x.type := xtype
 	ELSIF (sym = S.div) OR (sym = S.mod) DO
 		CheckInt(x); op := sym; GetSym; y := factor(); CheckInt(y);
 		x := NewNode(op, x, y); x.type := B.intType
@@ -405,33 +410,19 @@ BEGIN
 END term;
 
 PROCEDURE SimpleExpression(): B.Object;	
-	VAR x, y: B.Object; xtype: B.Type;
-		xform, op: INTEGER; errflag: BOOLEAN;
+	VAR x, y: B.Object; xtype: B.Type; op: INTEGER;
 BEGIN
 	IF sym = S.plus THEN GetSym; x := term()
-	ELSIF sym = S.minus THEN GetSym; x := term();
-		xtype := x.type; x := NewNode(S.minus, x, NIL);
-		IF (xtype.form IN {B.tInt, B.tReal, B.tSet}) THEN x.type := xtype
-		ELSE Mark('invalid type'); x.type := B.intType
-		END
+	ELSIF sym = S.minus THEN
+		GetSym; x := term(); xtype := x.type;
+		Check1(x, {B.tInt, B.tReal, B.tSet});
+		x := NewNode(S.minus, x, NIL); x.type := xtype
 	ELSE x := term()
 	END;
 	WHILE (sym = S.plus) OR (sym = S.minus) DO
-		xtype := x.type; xform := xtype.form;
-		IF xform IN {B.tInt, B.tReal, B.tSet} THEN (*valid*)
-		ELSE Mark('invalid type'); errflag := TRUE
-		END;
-		op := sym; GetSym; y := term();
-		IF (y.type = xtype) OR (xform = B.tInt) & (y.type.form = B.tInt)
-		THEN (*valid*) ELSE Mark('invalid type'); errflag := TRUE
-		END;
-		x := NewNode(op, x, y);
-		IF ~errflag THEN
-			IF xform = B.tInt THEN x.type := B.intType
-			ELSE x.type := xtype
-			END
-		ELSE x.type := B.intType
-		END
+		Check1(x, {B.tInt, B.tReal, B.tSet}); op := sym; GetSym; y := term();
+		IF ~CompTypes(xtype, y.type) THEN Mark('invalid type') END;
+		xtype := x.type; x := NewNode(op, x, y); x.type := xtype
 	ELSIF sym = S.or DO
 		CheckBool(x); GetSym; y := term(); CheckBool(y);
 		x := NewNode(S.or, x, y); x.type := B.boolType
@@ -440,58 +431,26 @@ BEGIN
 END SimpleExpression;
 
 PROCEDURE expression(): B.Object;
-	VAR x, y: B.Object; tp: B.Type;
-		xform, yform, op: INTEGER; errflag: BOOLEAN;
-BEGIN
-	x := SimpleExpression(); errflag := FALSE; xform := x.type.form;
-	IF (sym >= S.eql) & (sym <= S.in) THEN
-		IF sym <= S.neq THEN
-			IF (xform IN B.typEql + B.typCmp) OR IsStr(x.type) THEN (*valid*)
-			ELSE Mark('invalid type'); errflag := TRUE
-			END;
-			op := sym; GetSym; y := SimpleExpression(); yform := y.type.form;
-			IF ~CompTypes(x.type, y.type) & ~CompTypes(y.type, x.type) THEN
-				Mark('invalid expression'); errflag := TRUE
-			END
-		ELSIF (sym >= S.lss) & (sym <= S.geq) THEN
-			IF (xform IN B.typCmp) OR IsStr(x.type) THEN (*valid*)
-			ELSE Mark('invalid type'); errflag := TRUE;
-			END;
-			op := sym; GetSym; y := SimpleExpression(); yform := y.type.form;
-			IF ~CompTypes(x.type, y.type) & ~CompTypes(y.type, x.type) THEN
-				Mark('invalid expression'); errflag := TRUE
-			END
-		ELSIF sym = S.in THEN
-			IF xform # B.tInt THEN Mark('invalid type'); errflag := TRUE END;
-			op := sym; GetSym; y := SimpleExpression();
-			IF y.type.form # B.tSet THEN
-				Mark('invalid expression'); errflag := TRUE
-			END
-		END;
-		IF ~errflag THEN
-			x := NewNode(op, x, y); x.type := B.boolType
-		ELSE x := B.NewConst(B.boolType, 0)
-		END
+	VAR x, y: B.Object; tp: B.Type; op: INTEGER;
+BEGIN x := SimpleExpression();
+	IF (sym >= S.eql) & (sym <= S.geq) THEN
+		CheckLeft(x, sym); op := sym; GetSym; y := SimpleExpression();
+		IF ~CompTypes2(x.type, y.type) THEN Mark('invalid type') END;
+		x := NewNode(op, x, y); x.type := B.boolType
+	ELSIF sym = S.in THEN
+		CheckInt(x); GetSym; y := SimpleExpression(); CheckSet(y);
+		x := NewNode(S.in, x, y); x.type := B.boolType
 	ELSIF sym = S.is THEN
-		IF TypeTestable(x) THEN (*valid*)
-		ELSE Mark('invalid type'); errflag := TRUE
-		END;
-		GetSym;
-		IF sym = S.ident THEN y := qualident()
-		ELSE Missing(S.ident); errflag := TRUE
-		END;
-		IF ~errflag THEN
-			IF (y # NIL) & y.isType THEN tp := y.type;
-				IF (tp.form = B.tPtr) & (tp.base # NIL) & IsExt(tp, x.type)
-				OR (tp.form = B.tRec) & IsExt(tp, x.type)
-				THEN (*valid*) ELSE Mark('invalid type'); errflag := TRUE
-				END;
-			ELSE Mark('not type'); errflag := TRUE
+		CheckLeft(x, S.is); GetSym;
+		IF sym = S.ident THEN y := qualident() ELSE Missing(S.ident) END;
+		IF (y # NIL) & y.isType THEN tp := y.type;
+			IF (tp.form = B.tPtr) & (tp.base # NIL) & IsExt(tp, x.type)
+			OR (tp.form = B.tRec) & IsExt(tp, x.type)
+			THEN (*valid*) ELSE Mark('invalid type')
 			END
+		ELSE Mark('not type')
 		END;
-		IF ~errflag THEN x := NewNode(S.is, x, y); x.type := B.boolType
-		ELSE x := B.NewConst(B.boolType, 0)
-		END
+		x := NewNode(S.is, x, y); x.type := B.boolType
 	END;
 	RETURN x
 END expression;
@@ -534,8 +493,8 @@ END FormalType;
 PROCEDURE FPSection(proc: B.Type);
 	VAR ref, ronly: BOOLEAN;
 		first, ident: B.Ident; tp: B.Type;
-BEGIN ref := FALSE;
-	IF sym = S.var THEN ref := TRUE; GetSym END;
+BEGIN
+	IF sym = S.var THEN ref := TRUE; GetSym ELSE ref := FALSE END;
 	IF sym = S.ident THEN
 		first := NewIdent(S.id); GetSym;
 		WHILE sym = S.comma DO GetSym;
@@ -547,8 +506,8 @@ BEGIN ref := FALSE;
 		END
 	ELSE Mark('No params?')
 	END;
-	Check0(S.colon); tp := FormalType();
-	ronly := (tp.form = B.tArray) OR (tp.form = B.tRec); ident := first;
+	Check0(S.colon); tp := FormalType(); ident := first;
+	ronly := ~ref & (tp.form IN {B.tArray, B.tRec});
 	WHILE ident # NIL DO
 		ident.obj := B.NewPar(proc, ref, ronly, tp); ident := ident.next
 	END
@@ -568,9 +527,7 @@ BEGIN GetSym;
 	END;
 	Check0(S.rparen);
 	IF sym = S.colon THEN GetSym;
-		IF sym = S.ident THEN x := qualident()
-		ELSE Missing(S.ident); x := NIL
-		END;
+		IF sym = S.ident THEN x := qualident() ELSE Missing(S.ident) END;
 		IF (x # NIL) & x.isType THEN
 			IF ~(x.type.form IN {B.tArray, B.tRec}) THEN proc.base := x.type
 			ELSE Mark('invalid type')
@@ -618,7 +575,7 @@ BEGIN
 	Check0(S.colon); ft := type0(); field := first;
 	WHILE field # NIL DO
 		field.obj := B.NewField(rec, ft); field := field.next
-	END;
+	END
 END FieldList;
 
 PROCEDURE BaseType(): B.Type;
@@ -643,10 +600,10 @@ BEGIN
 END BaseType;
 
 PROCEDURE length(): INTEGER;
-	VAR x: B.Object; len: INTEGER;
-BEGIN x := ConstExpression(); len := 1;
-	IF x.type.form = B.tInt THEN len := x(B.Const).val ELSE Mark('not int') END;
-	RETURN len
+	VAR x: B.Object; n: INTEGER;
+BEGIN x := ConstExpression(); n := 1;
+	IF x.type.form = B.tInt THEN n := x(B.Const).val ELSE Mark('not int') END;
+	RETURN n
 END length;
 
 PROCEDURE type(): B.Type;
@@ -692,6 +649,7 @@ END type;
 PROCEDURE DeclarationSequence(VAR varblksize: INTEGER);
 	VAR first, ident, par: B.Ident; x: B.Object; tp: B.Type;
 		proc: B.Proc; varobj: B.Var; statseq: B.Node;
+		undef, prev: UndefPtrList;
 BEGIN
 	IF sym = S.const THEN GetSym;
 		WHILE sym = S.ident DO
@@ -709,8 +667,20 @@ BEGIN
 				IF ident # NIL THEN ident.obj := x END;
 				x.type := PointerType(x)
 			END;
-			Check0(S.semicolon)
-		END
+			Check0(S.semicolon);
+			IF (B.curLev = 0) & (ident # NIL) & (x.type.form = B.tRec) THEN
+				undef := undefList; prev := NIL;
+				WHILE (undef # NIL) & (undef.name # ident.name) DO
+					prev := undef; undef := undef.next
+				END;
+				IF undef # NIL THEN undef.tp.base := x.type;
+					IF prev # NIL THEN prev.next := undef.next
+					ELSE undefList := undef.next
+					END
+				END
+			END
+		END;
+		IF undefList # NIL THEN Mark('some pointers didnt have base type') END
 	END;
 	IF sym = S.var THEN GetSym;
 		WHILE sym = S.ident DO
