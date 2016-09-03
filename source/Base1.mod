@@ -24,6 +24,8 @@ TYPE
 	
 	Type* = POINTER TO TypeDesc;
 	Object* = POINTER TO ObjDesc;
+    Node* = POINTER TO NodeDesc;
+    Ident* = POINTER TO IdentDesc;
 	
 	ObjDesc* = EXTENSIBLE RECORD isType*: BOOLEAN; type*: Type END;
 	Const* = POINTER TO EXTENSIBLE RECORD (ObjDesc) val*: INTEGER END;
@@ -32,13 +34,14 @@ TYPE
 		adr*, lev*: INTEGER; ref*, ronly*: BOOLEAN
 	END;
 	Proc* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
-		adr*, lev*: INTEGER; ref*: BOOLEAN
+		adr*, lev*, locblksize*: INTEGER; ref*: BOOLEAN;
+        decl*: Ident; statseq*: Node; return*: Object
 	END;
 	
-	Ident* = POINTER TO RECORD name*: IdStr; obj*: Object; next*: Ident END;
+	IdentDesc* = RECORD name*: IdStr; obj*: Object; next*: Ident END;
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
 	
-	Node* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
+	NodeDesc* = EXTENSIBLE RECORD (ObjDesc)
 		op*: INTEGER; left*, right*: Object
 	END;
 	

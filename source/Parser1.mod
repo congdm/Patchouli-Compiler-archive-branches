@@ -46,6 +46,7 @@ END Check0;
 PROCEDURE Missing(s: INTEGER);
 BEGIN
 	IF s = S.ident THEN Mark('No ident?')
+    ELSIF s = S.return THEN Mark('No RETURN?')
 	ELSE ASSERT(FALSE)
 	END
 END Missing;
@@ -441,6 +442,14 @@ END ConstExpression;
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
+PROCEDURE StatementSequence(): B.Node;
+BEGIN
+    RETURN NIL
+END StatementSequence;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
 PROCEDURE FormalType(): B.Type;
 	VAR x: B.Object; tp: B.Type;
 BEGIN tp := B.intType;
@@ -616,6 +625,7 @@ END type;
 
 PROCEDURE DeclarationSequence(VAR varblksize: INTEGER);
 	VAR first, ident, par: B.Ident; x: B.Object; tp: B.Type; varobj: B.Var;
+        locblksize: INTEGER; statseq: B.Node;
 BEGIN
 	IF sym = S.const THEN GetSym;
 		WHILE sym = S.ident DO
@@ -651,27 +661,49 @@ BEGIN
 			END;
 		END
 	END;
-	IF S.errcnt = 0 THEN
-		WHILE sym = S.procedure DO GetSym;
-			IF sym = S.ident THEN
-				curProcIdent := NewIdent(S.id); GetSym;
-				proc := B.NewProc(); ident.obj := proc
-			ELSE curProcIdent := NIL; Mark('proc name?')
-			END;
-			tp := B.NewProcType();
-			IF sym = S.lparen THEN FormalParameters(tp) END;
-			Check0(S.semicolon);
-			IF proc # NIL THEN proc.type := tp END;
-			B.OpenScope; par := tp.fields;
-			WHILE par # NIL DO
-				ident := NewIdent(par.name); NEW(varobj); ident.obj := varobj;
-				varobj^ := par.obj(B.Var)^; par := par.next
-			END;
-			ident := curProcIdent; DeclarationSequence(locblksize);
-			curProcIdent := ident;
-			
-		END
-	END;
+    WHILE sym = S.procedure DO GetSym;
+        IF sym = S.ident THEN
+            curProcIdent := NewIdent(S.id); GetSym;
+            proc := B.NewProc(); ident.obj := proc
+        ELSE curProcIdent := NIL; Mark('proc name?')
+        END;
+        tp := B.NewProcType(); IF sym = S.lparen THEN FormalParameters(tp) END;
+        Check0(S.semicolon); IF proc # NIL THEN proc.type := tp END;
+        B.OpenScope; par := tp.fields;
+        WHILE par # NIL DO
+            ident := NewIdent(par.name); NEW(varobj); ident.obj := varobj;
+            varobj^ := par.obj(B.Var)^; par := par.next
+        END;
+        ident := curProcIdent; locblksize := 0;
+        DeclarationSequence(locblksize); curProcIdent := ident;
+        IF proc # NIL THEN
+            proc.decl := B.topScope.first; proc.locblksize := locblksize
+        END;
+        IF sym = S.begin THEN
+            GetSym; statseq := StatementSequence()
+        ELSE statseq := NIL
+        END;
+        IF sym = S.return THEN
+            IF tp.base = NIL THEN Mark('not function proc') END;
+            return := expression();
+            IF return.type.form IN {B.tArray, B.tRec} THEN
+                Mark('invalid type')
+            END                
+        ELSE return := NIL; IF tp.base # NIL THEN Missing(S.return) END
+        END;
+        IF proc # NIL THEN
+            proc.statseq := statseq; proc.return := return
+        END;
+        Check0(S.end);
+        IF sym = S.ident THEN
+            IF (curProcIdent # NIL) & (curProcIdent.name # S.id) THEN
+                Mark('wrong proc ident')
+            END;
+            GetSym
+        ELSIF curProcIdent # NIL THEN Missing(S.ident)
+        END;
+        Check0(S.semicolon)
+    END
 END DeclarationSequence;
 
 PROCEDURE Module*;
