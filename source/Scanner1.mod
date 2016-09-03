@@ -46,6 +46,8 @@ CONST
 	const* = 70; type* = 71; var* = 72; procedure* = 73; begin* = 74; 
 	return* = 75; import* = 76; module* = 77;
 	extensible* = 80; definition* = 81;
+	
+	call* = 100; par* = 101;
 
 VAR
 	ival*, slen*: INTEGER;

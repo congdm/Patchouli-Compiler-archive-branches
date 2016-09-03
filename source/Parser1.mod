@@ -46,7 +46,8 @@ END Check0;
 PROCEDURE Missing(s: INTEGER);
 BEGIN
 	IF s = S.ident THEN Mark('No ident?')
-    ELSIF s = S.return THEN Mark('No RETURN?')
+	ELSIF s = S.return THEN Mark('No RETURN?')
+	ELSIF s = S.comma THEN Mark('no ,')
 	ELSE ASSERT(FALSE)
 	END
 END Missing;
@@ -116,6 +117,30 @@ PROCEDURE TypeTestable(x: B.Object): BOOLEAN;
 	OR (x.type.form = B.tRec) & IsVarPar(x)
 END TypeTestable;
 
+PROCEDURE CheckPar(fpar: B.Var; x: B.Object);
+BEGIN
+	IF ~fpar.ref THEN
+		IF ~CompTypes(fpar.type, x.type) THEN Mark('invalid type') END
+	ELSIF fpar.ref THEN
+		IF x IS B.Var THEN
+			IF x(B.Var).ronly & ~fpar.ronly THEN Mark('read only') END;
+			IF (x.type = fpar.type)
+			OR (fpar.type.form = B.tRec) & (x.type.form = B.tRec)
+				& IsExt(x.type, fpar.type)
+			OR (fpar.type.form = B.tArray) & (fpar.type.len = 0)
+				& (x.type.form = B.tArray) & (fpar.type.base = x.type.base)
+			OR (fpar.type.form = B.tArray) & (x.type.form = B.tArray)
+				& (fpar.type.base = x.type.base) & (fpar.type.len = x.type.len)
+			OR (fpar.type.form = B.tArray) & (fpar.type.len = 0)
+				& (fpar.type.base = B.byteType)
+			OR IsStr(x.type) & IsStr(fpar.type)
+			THEN (*valid*) ELSE Mark('invalid type')
+			END
+		ELSE Mark('not var')
+		END
+	END
+END CheckPar;
+
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
@@ -140,19 +165,56 @@ BEGIN
 	RETURN z
 END NewNode;
 
+PROCEDURE Call(x: B.Object): B.Node;
+	VAR call, last: B.Node; proc: B.Proc; proctyp: B.Type;
+		fpar: B.Ident; nact: INTEGER;
+		
+	PROCEDURE Parameter(VAR last: B.Node; fpar: B.Ident);
+		VAR y: B.Object; par: B.Node;
+	BEGIN y := expression0();
+		IF fpar # NIL THEN CheckPar(fpar.obj(B.Var), y) END;
+		par := NewNode(S.par, y, NIL); last.right := par; last := par
+	END Parameter;
+		
+BEGIN (* Call *)
+	proc := x(B.Proc); proctyp := proc.type;
+	call := NewNode(S.call, proc, NIL); call.type := proctyp.base;
+	IF sym = S.lparen THEN GetSym;
+		IF sym # S.rparen THEN
+			fpar := proctyp.fields; Parameter(last, fpar); nact := 1;
+			WHILE sym = S.comma DO
+				IF fpar # NIL THEN fpar := fpar.next END; GetSym;
+				IF sym # S.rparen THEN Parameter(last, fpar); nact := nact + 1
+				ELSE Mark('remove ,')
+				END
+			END;
+			IF nact = proctyp.nfpar THEN (*valid*)
+			ELSIF nact > proctyp.nfpar THEN Mark('too many params')
+			ELSE Mark('not enough params')
+			END;
+			Check0(S.rparen)
+		ELSIF sym = S.rparen THEN
+			IF proctyp.nfpar # 0 THEN Mark('need params') END; GetSym
+		END
+	END;
+	RETURN call
+END Call;
+
 PROCEDURE qualident(): B.Object;
 	VAR x: B.Object; ident: B.Ident;
-BEGIN ident := B.topScope.first;
+		found: BOOLEAN;
+BEGIN ident := B.topScope.first; found := FALSE;
 	WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
-	IF ident # NIL THEN x := ident.obj
+	IF ident # NIL THEN x := ident.obj; found := TRUE
 	ELSIF (curProcIdent # NIL) & (S.id = curProcIdent.name) THEN
-		x := curProcIdent.obj
+		x := curProcIdent.obj; found := TRUE
 	ELSE ident := B.universe.first;
 		WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
-		IF ident # NIL THEN x := ident.obj
+		IF ident # NIL THEN x := ident.obj; found := TRUE
 		ELSE Mark('identifier not found')
 		END
 	END;
+	IF found & (x = NIL) THEN Mark('identifier undefined') END;
 	RETURN x
 END qualident;
 
@@ -285,7 +347,11 @@ BEGIN
 	ELSIF sym = S.true THEN x := B.NewConst(B.boolType, 1)
 	ELSIF sym = S.false THEN x := B.NewConst(B.boolType, 0)
 	ELSIF sym = S.lbrace THEN x := set()
-	ELSIF sym = S.ident THEN x := designator() (*stub*)
+	ELSIF sym = S.ident THEN x := designator();
+		IF (sym = S.lparen) & (x.type.form = B.tProc) THEN
+			IF x.type.base = NIL THEN Mark('not function') END;
+			x := Call(x); IF x.type = NIL THEN x.type := B.intType END
+		END
 	ELSIF sym = S.lparen THEN GetSym; x := expression0(); Check0(S.rparen)
 	ELSIF sym = S.not THEN GetSym; x := factor(); CheckBool(x);
 		x := NewNode(S.not, x, NIL); x.type := B.boolType
@@ -444,7 +510,7 @@ END ConstExpression;
 
 PROCEDURE StatementSequence(): B.Node;
 BEGIN
-    RETURN NIL
+	RETURN NIL
 END StatementSequence;
 
 (* -------------------------------------------------------------------------- *)
@@ -624,8 +690,8 @@ BEGIN tp := B.intType;
 END type;
 
 PROCEDURE DeclarationSequence(VAR varblksize: INTEGER);
-	VAR first, ident, par: B.Ident; x: B.Object; tp: B.Type; varobj: B.Var;
-        locblksize: INTEGER; statseq: B.Node;
+	VAR first, ident, par: B.Ident; x: B.Object; tp: B.Type;
+		proc: B.Proc; varobj: B.Var; statseq: B.Node;
 BEGIN
 	IF sym = S.const THEN GetSym;
 		WHILE sym = S.ident DO
@@ -636,12 +702,12 @@ BEGIN
 	END;
 	IF sym = S.type THEN GetSym; undefList := NIL;
 		WHILE sym = S.ident DO
-			ident := NewIdent(S.id); x := NIL;
-			IF ident # NIL THEN NEW(x); x.isType := FALSE; ident.obj := x END;
+			ident := NewIdent(S.id); NEW(x); x.isType := TRUE;
 			GetSym; Check0(S.eql);
-			IF (sym # S.pointer) OR (x = NIL) THEN tp := type();
-				IF x # NIL THEN x.type := tp; x.isType := TRUE END
-			ELSE x.isType := TRUE; x.type := PointerType(x)
+			IF sym # S.pointer THEN x.type := type()
+			ELSE
+				IF ident # NIL THEN ident.obj := x END;
+				x.type := PointerType(x)
 			END;
 			Check0(S.semicolon)
 		END
@@ -661,49 +727,38 @@ BEGIN
 			END;
 		END
 	END;
-    WHILE sym = S.procedure DO GetSym;
-        IF sym = S.ident THEN
-            curProcIdent := NewIdent(S.id); GetSym;
-            proc := B.NewProc(); ident.obj := proc
-        ELSE curProcIdent := NIL; Mark('proc name?')
-        END;
-        tp := B.NewProcType(); IF sym = S.lparen THEN FormalParameters(tp) END;
-        Check0(S.semicolon); IF proc # NIL THEN proc.type := tp END;
-        B.OpenScope; par := tp.fields;
-        WHILE par # NIL DO
-            ident := NewIdent(par.name); NEW(varobj); ident.obj := varobj;
-            varobj^ := par.obj(B.Var)^; par := par.next
-        END;
-        ident := curProcIdent; locblksize := 0;
-        DeclarationSequence(locblksize); curProcIdent := ident;
-        IF proc # NIL THEN
-            proc.decl := B.topScope.first; proc.locblksize := locblksize
-        END;
-        IF sym = S.begin THEN
-            GetSym; statseq := StatementSequence()
-        ELSE statseq := NIL
-        END;
-        IF sym = S.return THEN
-            IF tp.base = NIL THEN Mark('not function proc') END;
-            return := expression();
-            IF return.type.form IN {B.tArray, B.tRec} THEN
-                Mark('invalid type')
-            END                
-        ELSE return := NIL; IF tp.base # NIL THEN Missing(S.return) END
-        END;
-        IF proc # NIL THEN
-            proc.statseq := statseq; proc.return := return
-        END;
-        Check0(S.end);
-        IF sym = S.ident THEN
-            IF (curProcIdent # NIL) & (curProcIdent.name # S.id) THEN
-                Mark('wrong proc ident')
-            END;
-            GetSym
-        ELSIF curProcIdent # NIL THEN Missing(S.ident)
-        END;
-        Check0(S.semicolon)
-    END
+	WHILE sym = S.procedure DO GetSym;
+		IF sym = S.ident THEN curProcIdent := NewIdent(S.id); GetSym
+		ELSE curProcIdent := NIL; Mark('proc name?')
+		END;
+		proc := B.NewProc(); tp := B.NewProcType(); proc.type := tp;
+		IF sym = S.lparen THEN FormalParameters(tp) END; Check0(S.semicolon);
+		B.OpenScope; B.IncLev(1); par := tp.fields;
+		WHILE par # NIL DO
+			ident := NewIdent(par.name); NEW(varobj); ident.obj := varobj;
+			varobj^ := par.obj(B.Var)^; par := par.next
+		END;
+		ident := curProcIdent; DeclarationSequence(proc.locblksize);
+		curProcIdent := ident; proc.decl := B.topScope.first;
+		IF curProcIdent # NIL THEN curProcIdent.obj := proc END;
+		
+		IF sym = S.begin THEN GetSym; proc.statseq := StatementSequence() END;
+		IF sym = S.return THEN
+			IF tp.base = NIL THEN Mark('not function proc') END;
+			x := expression(); proc.return := x;
+			IF x.type.form IN {B.tArray, B.tRec} THEN Mark('invalid type') END                
+		ELSIF tp.base # NIL THEN Missing(S.return)
+		END;
+		
+		B.CloseScope; B.IncLev(-1); Check0(S.end);
+		IF sym = S.ident THEN
+			IF (curProcIdent # NIL) & (curProcIdent.name # S.id) THEN
+				Mark('wrong proc ident')
+			END; GetSym
+		ELSIF curProcIdent # NIL THEN Missing(S.ident)
+		END;
+		Check0(S.semicolon)
+	END
 END DeclarationSequence;
 
 PROCEDURE Module*;
@@ -712,7 +767,7 @@ PROCEDURE Module*;
 BEGIN GetSym; modid[0] := 0X;
 	IF sym = S.ident THEN modid := S.id; GetSym ELSE Missing(S.ident) END;
 	Check0(S.semicolon); DeclarationSequence(varblksize);
-	IF errcnt = 0 THEN
+	IF S.errcnt = 0 THEN
 	END
 END Module;
 	

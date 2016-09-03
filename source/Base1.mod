@@ -319,12 +319,10 @@ END NewConst;
 PROCEDURE NewPar*(proc: Type; ref, ronly: BOOLEAN; tp: Type): Var;
 	VAR v: Var; parsize: INTEGER;
 BEGIN
-	IF ~ref & (tp.form IN {tArray, tRec}) THEN
-		ref := (tp.size # 1) & (tp.size # 2) & (tp.size # 4) & (tp.size # 8)
-	END;
+	ref := tp.form IN {tArray, tRec};
 	IF ref & ~ronly & (tp.form = tRec)
-	OR (tp.form = tArray) & (tp.len = 0) THEN
-		parsize := WordSize * 2
+	OR (tp.form = tArray) & (tp.len = 0)
+	THEN parsize := WordSize * 2
 	ELSE parsize := WordSize
 	END;
 	NEW(v); v.isType := FALSE; v.type := tp;
@@ -349,7 +347,8 @@ END NewStr;
 PROCEDURE NewProc*(): Proc;
 	VAR p: Proc;
 BEGIN
-	NEW(p); p.isType := FALSE; p.lev := curLev; p.ref := FALSE
+	NEW(p); p.isType := FALSE; p.ref := FALSE;
+	p.lev := curLev; p.locblksize := 0
 	RETURN p
 END NewProc;
 
@@ -420,6 +419,10 @@ END OpenScope;
 PROCEDURE CloseScope*;
 BEGIN topScope := topScope.dsc
 END CloseScope;
+
+PROCEDURE IncLev*(n: INTEGER);
+BEGIN curLev := curLev + n
+END IncLev;
 
 BEGIN
 	NEW(universe); topScope := universe; curLev := 0
