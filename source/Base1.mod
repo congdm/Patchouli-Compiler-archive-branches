@@ -37,6 +37,9 @@ TYPE
 		adr*, lev*, locblksize*: INTEGER; ref*: BOOLEAN;
         decl*: Ident; statseq*: Node; return*: Object
 	END;
+	Str* = POINTER TO EXTENSIBLE RECORD (Var)
+		chars*: String; len*: INTEGER
+	END;
 	
 	IdentDesc* = RECORD name*: IdStr; obj*: Object; next*: Ident END;
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
@@ -54,10 +57,13 @@ TYPE
 VAR
 	(* Predefined Types *)
 	intType*, byteType*, realType*: Type;
-	boolType*, setType*, charType*, nilType*: Type;
+	boolType*, setType*, charType*, nilType*, strType*: Type;
 	
 	topScope*, universe*: Scope;
 	curLev*: INTEGER;
+	
+	sbuf: ARRAY 100000H OF CHAR;
+	sbufsz: INTEGER;
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -340,8 +346,12 @@ BEGIN
 	IF rec.align < tp.align THEN rec.align := tp.align END
 END NewField;
 
-PROCEDURE NewStr*(str: String; slen: INTEGER): Var;
-	RETURN NIL
+PROCEDURE NewStr*(str: String; slen: INTEGER): Str;
+	VAR x: Str;
+BEGIN
+	NEW(x); x.isType := FALSE; x.type := strType; x.lev := 0; x.ref := FALSE;
+	x.ronly := TRUE; x.adr := sbufsz; x.chars := str; x.len := slen
+	RETURN x
 END NewStr;
 
 PROCEDURE NewProc*(): Proc;
@@ -425,5 +435,5 @@ BEGIN curLev := curLev + n
 END IncLev;
 
 BEGIN
-	NEW(universe); topScope := universe; curLev := 0
+	NEW(universe); topScope := universe; curLev := 0; sbufsz := 0
 END Base1.
