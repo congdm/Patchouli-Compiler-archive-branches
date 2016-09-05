@@ -12,7 +12,6 @@ VAR
 	sym: INTEGER;
 	undefList: UndefPtrList;
 	curProcIdent: B.Ident;
-	sentinel: B.Node;
 	
 	type0: PROCEDURE(): B.Type;
 	expression0: PROCEDURE(): B.Object;
@@ -45,6 +44,7 @@ BEGIN
 	ELSIF expect = S.do THEN Mark('No DO')
 	ELSIF expect = S.until THEN Mark('No UNTIL')
 	ELSIF expect = S.becomes THEN Mark('No :=')
+	ELSIF expect = S.period THEN Mark('No .')
 	ELSE ASSERT(FALSE)
 	END;
 END Check0;
@@ -185,7 +185,7 @@ END Check1;
 PROCEDURE NewIdent(name: B.IdStr): B.Ident;
 	VAR ident, p: B.Ident;
 BEGIN
-	NEW(ident); ident.name := name;
+	NEW(ident); ident.name := name; ident.next := NIL;
 	IF B.topScope.first = NIL THEN B.topScope.first := ident
 	ELSE p := B.topScope.first;
 		WHILE (p.next # NIL) & (p.name # name) DO p := p.next END;
@@ -259,8 +259,22 @@ BEGIN ident := B.topScope.first; found := FALSE;
 END FindIdent;
 
 PROCEDURE qualident(): B.Object;
-BEGIN (* stub *)
-	RETURN FindIdent()
+	VAR x: B.Object; ident: B.Ident;
+BEGIN x := FindIdent();
+	IF (x IS B.Module) & (sym = S.period) THEN GetSym;
+		IF sym = S.ident THEN
+			ident := x(B.Module).first;
+			WHILE (ident # NIL) & (ident.name # S.id) DO
+				ident := ident.next
+			END;
+			IF ident = NIL THEN Mark('not found'); x := NIL
+			ELSE x := ident.obj
+			END
+		ELSE Missing(S.ident); x := NIL
+		END
+	ELSIF x IS B.Module THEN x := NIL
+	END;
+	RETURN x
 END qualident;
 
 PROCEDURE designator(): B.Object;
@@ -446,7 +460,7 @@ END expression;
 PROCEDURE ConstExpression(): B.Object;
 	VAR x: B.Object;
 BEGIN x := expression();
-	IF (x IS B.Const) OR (x IS B.Var) & (x.type.form = B.tStr) THEN (*valid*)
+	IF IsConst(x) THEN (*valid*)
 	ELSE Mark('not const'); x := B.NewConst(B.intType, 0)
 	END;
 	RETURN x
@@ -852,17 +866,22 @@ BEGIN
 END DeclarationSequence;
 
 PROCEDURE Module*;
-	VAR modid: B.IdStr;
+	VAR modid: B.IdStr; modinit: B.Node;
 		varblksize: INTEGER;
 BEGIN GetSym; modid[0] := 0X;
 	IF sym = S.ident THEN modid := S.id; GetSym ELSE Missing(S.ident) END;
 	Check0(S.semicolon); DeclarationSequence(varblksize);
-	IF S.errcnt = 0 THEN
-	END
+	IF sym = S.begin THEN GetSym; modinit := StatementSequence() END;
+	Check0(S.end);
+	IF sym = S.ident THEN
+		IF S.id # modid THEN Mark('wrong module name') END; GetSym
+	ELSE Missing(S.ident)
+	END;
+	Check0(S.period);
+	IF S.errcnt = 0 THEN G.Generate(modid, modinit) END
 END Module;
 	
 BEGIN
 	type0 := type; expression0 := expression;
-	StatementSequence0 := StatementSequence;
-	sentinel := NewNode(S.null, NIL, NIL)
+	StatementSequence0 := StatementSequence
 END Parser1.

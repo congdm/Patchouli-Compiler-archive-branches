@@ -40,6 +40,9 @@ TYPE
 	Str* = POINTER TO EXTENSIBLE RECORD (Var)
 		chars*: String; len*: INTEGER
 	END;
+	Module* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
+		first*: Ident
+	END;
 	
 	IdentDesc* = RECORD name*: IdStr; obj*: Object; next*: Ident END;
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
@@ -60,10 +63,8 @@ VAR
 	boolType*, setType*, charType*, nilType*, strType*: Type;
 	
 	topScope*, universe*: Scope;
-	curLev*: INTEGER;
+	curLev*, sbufsz*: INTEGER;
 	
-	sbuf: ARRAY 100000H OF CHAR;
-	sbufsz: INTEGER;
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -350,7 +351,8 @@ PROCEDURE NewStr*(str: String; slen: INTEGER): Str;
 	VAR x: Str;
 BEGIN
 	NEW(x); x.isType := FALSE; x.type := strType; x.lev := 0; x.ref := FALSE;
-	x.ronly := TRUE; x.adr := sbufsz; x.chars := str; x.len := slen
+	x.ronly := TRUE; x.adr := sbufsz; x.chars := str; x.len := slen;
+	sbufsz := sbufsz + slen * CharSize;
 	RETURN x
 END NewStr;
 
@@ -435,5 +437,13 @@ BEGIN curLev := curLev + n
 END IncLev;
 
 BEGIN
-	NEW(universe); topScope := universe; curLev := 0; sbufsz := 0
+	NEW(universe); topScope := universe; curLev := 0; sbufsz := 0;
+	NEW(intType); intType.form := tInt;
+	NEW(byteType); byteType.form := tInt;
+	NEW(charType); charType.form := tChar;
+	NEW(setType); setType.form := tSet;
+	NEW(realType); realType.form := tReal;
+	NEW(boolType); boolType.form := tBool;
+	NEW(nilType); nilType.form := tNil;
+	NEW(strType); strType.form := tStr
 END Base1.

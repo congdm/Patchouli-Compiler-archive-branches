@@ -1,7 +1,10 @@
 MODULE Generator1;
 
 IMPORT
-	SYS := SYSTEM, B := Base1, S := Scanner1;
+	SYS := SYSTEM, B := Base1, S := Scanner1, Con := Console;
+	
+VAR
+	indentLev: INTEGER;
 	
 PROCEDURE FoldConst*(op: INTEGER; x, y: B.Object): B.Object;
 	VAR val, xval, yval: INTEGER; type: B.Type;
@@ -31,5 +34,9 @@ BEGIN
 	x := B.NewConst(type, val);
 	RETURN x
 END FoldConst;
+
+PROCEDURE Generate*(modid: B.IdStr; modinit: B.Node);
+BEGIN
+END Generate;
 
 END Generator1.
