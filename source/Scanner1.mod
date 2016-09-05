@@ -349,6 +349,7 @@ BEGIN Base.StrCopy(name, keyTab[k].id); keyTab[k].sym := sym; INC(k)
 END EnterKW;
 
 BEGIN
+	Base.InstallMark(Mark);
 	k := 0; KWX[0] := 0; KWX[1] := 0;
 	EnterKW(if, 'IF');
 	EnterKW(do, 'DO');

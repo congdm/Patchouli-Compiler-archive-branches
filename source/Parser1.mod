@@ -75,7 +75,7 @@ BEGIN
 END IsExt;
 
 PROCEDURE IsVarPar(x: B.Object): BOOLEAN;
-	RETURN (x IS B.Var) & x(B.Var).ref & ~x(B.Var).ronly
+	RETURN (x IS B.Var) & x.par & (x.class = B.cRef)
 END IsVarPar;
 
 PROCEDURE IsConst(x: B.Object): BOOLEAN;
@@ -89,8 +89,8 @@ END IsOpenArray;
 PROCEDURE SamePars(p1, p2: B.Ident): BOOLEAN;
 	RETURN (p1 = NIL) & (p2 = NIL)
 	OR (p1 # NIL) & (p2 # NIL)
+		& (p1.obj.class = p2.obj.class)
 		& (p1.obj(B.Var).ronly = p2.obj(B.Var).ronly)
-		& (p1.obj(B.Var).ref = p2.obj(B.Var).ref)
 		& ((p1.obj.type = p2.obj.type)
 			OR (p1.obj.type.form = B.tArray) & (p2.obj.type.form = B.tArray)
 				& (p1.obj.type.len = 0) & (p2.obj.type.len = 0)
@@ -140,9 +140,9 @@ END TypeTestable;
 PROCEDURE CheckPar(fpar: B.Var; x: B.Object);
 	VAR xtype, ftype: B.Type; xform, fform: INTEGER;
 BEGIN xtype := x.type; ftype := fpar.type;
-	IF ~fpar.ref THEN
+	IF fpar.class = B.cVar THEN
 		IF ~CompTypes(ftype, xtype) THEN Mark('invalid type') END
-	ELSIF fpar.ref THEN
+	ELSIF fpar.class = B.cRef THEN
 		IF x IS B.Var THEN xform := xtype.form; fform := ftype.form;
 			IF x(B.Var).ronly & ~fpar.ronly THEN Mark('read only') END;
 			IF (xtype = ftype)
@@ -199,7 +199,7 @@ END NewIdent;
 PROCEDURE NewNode(op: INTEGER; x, y: B.Object): B.Node;
 	VAR z: B.Node;
 BEGIN
-	NEW(z); z.isType := FALSE; z.op := op; z.left := x; z.right := y;
+	NEW(z); z.class := B.cNode; z.op := op; z.left := x; z.right := y;
 	RETURN z
 END NewNode;
 
@@ -281,7 +281,7 @@ PROCEDURE designator(): B.Object;
 	VAR x, y: B.Object; fid: B.IdStr; fld: B.Ident;
 		recType, xtype, ytype: B.Type;
 BEGIN x := qualident();
-	IF (x = NIL) OR x.isType THEN
+	IF (x = NIL) OR (x.class <= B.cType) THEN
 		x := B.NewConst(B.intType, 0); Mark('invalid value')
 	END;
 	WHILE sym = S.period DO
@@ -321,7 +321,7 @@ BEGIN x := qualident();
 	ELSIF (sym = S.lparen) & TypeTestable(x) DO
 		xtype := x.type; GetSym; y := NIL;
 		IF sym = S.ident THEN y := qualident() ELSE Missing(S.ident) END;
-		IF (y # NIL) & y.isType THEN ytype := y.type
+		IF (y # NIL) & (y.class = B.cType) THEN ytype := y.type
 		ELSE Mark('not type'); ytype := x.type
 		END;
 		x := NewNode(S.lparen, x, y);
@@ -445,7 +445,7 @@ BEGIN x := SimpleExpression();
 	ELSIF sym = S.is THEN
 		CheckLeft(x, S.is); GetSym;
 		IF sym = S.ident THEN y := qualident() ELSE Missing(S.ident) END;
-		IF (y # NIL) & y.isType THEN tp := y.type;
+		IF (y # NIL) & (y.class = B.cType) THEN tp := y.type;
 			IF (tp.form = B.tPtr) & (tp.base # NIL) & IsExt(tp, x.type)
 			OR (tp.form = B.tRec) & IsExt(tp, x.type)
 			THEN (*valid*) ELSE Mark('invalid type')
@@ -524,7 +524,7 @@ PROCEDURE Case(): B.Node;
 	BEGIN
 		bar := NewNode(S.bar, NIL, NIL); y := qualident();
 		xtype := x.type; xform := x.type.form; yform := y.type.form;
-		IF (y # NIL) & (y.isType) THEN
+		IF (y # NIL) & (y.class = B.cType) THEN
 			IF (xform = B.tPtr) & (yform = B.tPtr) & IsExt(y.type, xtype)
 			OR (xform = B.tRec) & (yform = B.tRec) & IsExt(y.type, xtype)
 			THEN x.type := y.type
@@ -613,7 +613,7 @@ PROCEDURE FormalType(): B.Type;
 	VAR x: B.Object; tp: B.Type;
 BEGIN tp := B.intType;
 	IF sym = S.ident THEN x := qualident();
-		IF (x # NIL) & x.isType THEN tp := x.type
+		IF (x # NIL) & (x.class = B.cType) THEN tp := x.type
 		ELSE Mark('not type')
 		END
 	ELSIF sym = S.array THEN
@@ -662,7 +662,7 @@ BEGIN GetSym;
 	Check0(S.rparen);
 	IF sym = S.colon THEN GetSym;
 		IF sym = S.ident THEN x := qualident() ELSE Missing(S.ident) END;
-		IF (x # NIL) & x.isType THEN
+		IF (x # NIL) & (x.class = B.cType) THEN
 			IF ~(x.type.form IN {B.tArray, B.tRec}) THEN proc.base := x.type
 			ELSE Mark('invalid type')
 			END
@@ -680,7 +680,8 @@ BEGIN
 	IF sym = S.ident THEN ident := B.universe.first;
 		WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
 		IF ident # NIL THEN x := ident.obj;
-			IF x.isType & (x.type.form = B.tRec) THEN ptrType.base := x.type
+			IF (x.class = B.cType) & (x.type.form = B.tRec) THEN
+				ptrType.base := x.type
 			ELSE Mark('not record type')
 			END
 		ELSIF B.curLev = 0 THEN
@@ -717,8 +718,10 @@ PROCEDURE BaseType(): B.Type;
 BEGIN
 	IF sym = S.ident THEN x := qualident();
 		IF x # NIL THEN
-			IF x.isType & (x.type.form = B.tRec) THEN btype := x.type
-			ELSIF x.isType & (x.type.form = B.tPtr) THEN p := x.type;
+			IF (x.class = B.cType) & (x.type.form = B.tRec) THEN
+				btype := x.type
+			ELSIF (x.class = B.cType) & (x.type.form = B.tPtr) THEN
+				p := x.type;
 				IF p.base # NIL THEN btype := p.base
 				ELSE Mark('this type is not defined yet')
 				END
@@ -745,7 +748,9 @@ PROCEDURE type(): B.Type;
 		ident: B.Ident; len: INTEGER;
 BEGIN tp := B.intType;
 	IF sym = S.ident THEN x := qualident();
-		IF (x # NIL) & x.isType THEN tp := x.type ELSE Mark('not type') END
+		IF (x # NIL) & (x.class = B.cType) THEN tp := x.type
+		ELSE Mark('not type')
+		END
 	ELSIF sym = S.array THEN
 		GetSym; len := length(); tp := B.NewArray(len); lastArr := tp;
 		WHILE sym = S.comma DO GetSym;
@@ -794,8 +799,8 @@ BEGIN
 	END;
 	IF sym = S.type THEN GetSym; undefList := NIL;
 		WHILE sym = S.ident DO
-			ident := NewIdent(S.id); NEW(x); x.isType := TRUE;
-			GetSym; Check0(S.eql);
+			ident := NewIdent(S.id);
+			NEW(x); x.class := B.cType; GetSym; Check0(S.eql);
 			IF sym # S.pointer THEN x.type := type()
 			ELSE
 				IF ident # NIL THEN ident.obj := x END;
