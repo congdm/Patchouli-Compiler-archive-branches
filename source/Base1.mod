@@ -11,7 +11,7 @@ CONST
 	MaxImpMod* = 256; MaxExpTypes* = 1024;
 	
 	(* Object class *)
-	cModule* = 0; cType* = 1;
+	cNull* = -1; cModule* = 0; cType* = 1;
 	cNode* = 2; cVar* = 3; cRef* = 4; cConst* = 5;
 	cProc* = 6; cField* = 8; cSProc* = 9; cSFunc* = 10;
 	
@@ -79,7 +79,7 @@ VAR
 	topScope*, universe*: Scope;
 	curLev*, sbufsz*: INTEGER;
 	
-	refno, preTypeNo, expno: INTEGER;
+	refno, preTypeNo, expno, nmod: INTEGER;
 	expList*: Ident;
 	modList*: ARRAY MaxImpMod OF Module;
 	
@@ -360,7 +360,7 @@ PROCEDURE NewField*(rec, tp: Type): Field;
 BEGIN
 	NEW(fld); fld.class := cField; fld.type := tp;
 	off := rec.size; off := off + (-off) MOD tp.align;
-	fld.off := off; rec.size := off + tp.size;
+	fld.off := off; rec.size := off + tp.size; rec.nptr := rec.nptr + tp.nptr;
 	IF rec.align < tp.align THEN rec.align := tp.align END
 END NewField;
 
@@ -387,7 +387,7 @@ END NewProc;
 PROCEDURE NewType*(VAR typ: Type; form: INTEGER);
 BEGIN
 	NEW(typ); typ.form := form;
-	tp.align := 0; tp.size := 0;
+	typ.nptr := 0; tp.align := 0; tp.size := 0;
 	typ.mod := -1; typ.ref := -1
 END NewType;
 
@@ -404,6 +404,7 @@ BEGIN
 		CalculateArraySize(arrType.base, lastArray)
 	END;
 	arrType.size := arrType.len * arrType.base.size;
+	arrType.nptr := arrType.len * arrType.base.nptr;
 	IF arrType.align < arrType.base.align THEN
 		arrType.align := arrType.base.align
 	END
@@ -420,13 +421,15 @@ PROCEDURE ExtendRecord*(recType: Type);
 BEGIN
 	recType.size := recType.base.size;
 	recType.align := recType.base.align;
-	recType.len := recType.base.len + 1
+	recType.len := recType.base.len + 1;
+	recType.nptr := recType.base.nptr
 END ExtendRecord;
 
 PROCEDURE NewPointer*(): Type;
 	VAR tp: Type;
 BEGIN
-	NewType(tp, tPtr); tp.size := WordSize; tp.align := WordSize;
+	NewType(tp, tPtr); tp.size := WordSize;
+	tp.align := WordSize; tp.nptr := 1;
 	RETURN tp
 END NewPointer;
 
@@ -450,32 +453,32 @@ END NewPredefinedType;
 (* -------------------------------------------------------------------------- *)
 (* Export symbol file *)
 
-PROCEDURE Detect_type(typ: Type);
+PROCEDURE DetectType(typ: Type);
 BEGIN
 	IF typ # NIL THEN
 		WriteInt(symfile, typ.mod); WriteInt(symfile, typ.ref);
 		IF typ.mod >= 0 THEN WriteStr(modList[typ.mod].name) END;
-		IF (typ.mod = -1) & (typ.ref < 0) THEN Export_type0(typ) END
+		IF (typ.mod = -1) & (typ.ref < 0) THEN ExportType0(typ) END
 	ELSE WriteInt(symfile, -2); WriteInt(symfile, 0)
 	END
-END Detect_type;
+END DetectType;
 
-PROCEDURE Export_proc(typ: Type);
+PROCEDURE ExportProc(typ: Type);
 	VAR par: Ident; x: Var;
 BEGIN
-	Detect_type(typ.base); WriteInt (symfile, typ.len);
+	DetectType(typ.base); WriteInt (symfile, typ.len);
 	WriteInt (symfile, typ.parblksize); par := typ.fields;
 	WHILE par # NIL DO x := par.obj(Var);
 		WriteInt(symfile, x.class);
 		WriteStr(symfile, par.name);
 		WriteInt(ORD(x.ronly));
-		Detect_type(x.type);
+		DetectType(x.type);
 		par := par.next
 	END;
 	WriteInt(symfile, cType)
-END Export_proc;
+END ExportProc;
 	
-PROCEDURE Export_type(typ: Type);
+PROCEDURE ExportType(typ: Type);
 	VAR fld, ident: Ident; i: INTEGER; s: String;
 BEGIN
 	IF refno < MaxExpTypes THEN typ.ref := refno; INC(refno)
@@ -487,112 +490,107 @@ BEGIN
 		ident.obj.type := typ; WriteInt(expno)
 	ELSE WriteInt(symfile, 0)
 	END;
-	
 	WriteInt(symfile, typ.form);
 	IF typ.form = tRec THEN
-		Detect_type(typ.base);
+		DetectType(typ.base);
 		WriteInt(symfile, typ.len);
 		WriteInt(symfile, typ.size);
 		WriteInt(symfile, typ.nptr);
 		WriteInt(symfile, typ.align);
-		
 		i := 0; fld := typ.fields;
 		WHILE fld # NIL DO
-			IF field.export OR (field.type.nptr > 0) THEN
-				WriteInt (symfile, cField);
-				IF ~field.export THEN s[0] := 0X; WriteStr (symfile, s)
-				ELSE WriteStr (symfile, field.name)
+			IF fld.export OR (fld.obj.type.nptr > 0) THEN
+				WriteInt(symfile, cField);
+				IF ~fld.export THEN s[0] := 0X; WriteStr(symfile, s)
+				ELSE WriteStr(symfile, fld.name)
 				END;
-				Detect_type (field.type);
-				WriteInt (symfile, field.val)
+				DetectType(fld.type);
+				WriteInt(symfile, fld.obj(Field).off)
 			END;
-			field := field.next
+			fld := fld.next
 		END;
 		WriteInt (symfile, cType)
 	ELSIF typ.form = tArray THEN
-		Detect_type (typ.base);
-		WriteInt (symfile, typ.len);
-		WriteInt (symfile, typ.size);
-		WriteInt (symfile, typ.nptr);
-		WriteInt (symfile, typ.alignment)
+		DetectType (typ.base);
+		WriteInt(symfile, typ.len);
+		WriteInt(symfile, typ.size);
+		WriteInt(symfile, typ.nptr);
+		WriteInt(symfile, typ.align)
 	ELSIF typ.form = tPtr THEN
-		Detect_type(typ.base)
+		DetectType(typ.base)
 	ELSIF typ.form = tProc THEN
-		Export_proc(typ)
+		ExportProc(typ)
 	END
-END Export_type;
+END ExportType;
 
-PROCEDURE Write_module_key (key: ModuleKey);
+(*PROCEDURE Write_module_key (key: ModuleKey);
 BEGIN
-	Write_8bytes (symfile, key[0]);
-	Write_8bytes (symfile, key[1])
-END Write_module_key;
+	Write_8bytes(symfile, key[0]);
+	Write_8bytes(symfile, key[1])
+END Write_module_key;*)
 
 PROCEDURE Write_symbols_file*;
-	VAR obj: Object; i, k, n, size: INTEGER; mod: Module;
+	VAR ident, exp: Ident; i, k, n, size: INTEGER; mod: Module;
 		hash: Crypt.MD5Hash; chunk: ARRAY 64 OF BYTE;
 BEGIN
 	refno := 0; expno := 0;
-	Rewrite (symfile, 'sym.temp_'); Seek (symfile, 16);
+	Rewrite(symfile, 'sym.temp_'); Seek(symfile, 16);
 	WriteInt (symfile, module.lev);
-	WriteInt (symfile, ORD(isDefinitionModule));
 	
-	mod := moduleList;
-	WHILE mod # NIL DO
-		WriteInt (symfile, cModule);
-		WriteStr (symfile, mod.name);
-		Write_module_key (mod.key); WriteInt (symfile, mod.lev);
-		WriteInt (symfile, mod.modno); mod := mod.next
+	FOR i := 0 TO nmod-1 DO
+		mod := modList[0];
+		IF mod.export THEN
+			WriteInt(symfile, cModule);
+			WriteStr(symfile, mod.name)
+		END
 	END;
 	
-	obj := universe.next;
-	WHILE obj # guard DO
-		IF obj.export THEN
-			IF obj.class = cConst THEN
-				WriteInt (symfile, cConst);
-				WriteStr (symfile, obj.name);
-				WriteInt (symfile, obj.val);
-				Detect_type (obj.type)
-			ELSIF obj.class = cType THEN
-				WriteInt (symfile, cType);
-				WriteStr (symfile, obj.name);
-				Detect_type (obj.type);
-				IF obj.type.form = tRecord THEN
-					INC (expno); obj.expno := expno;
-					WriteInt (symfile, expno)
-				END
-			ELSIF obj.class = cVar THEN
-				WriteInt (symfile, cVar);
-				WriteStr (symfile, obj.name);
-				WriteInt (symfile, obj.val2);
-				INC (expno); obj.expno := expno;
+	ident := universe.first;
+	WHILE ident # NIL DO
+		IF ident.export THEN
+			IF ident.obj.class = cModule THEN
+				WriteInt(symfile, cModule);
+				WriteStr(symfile, ident.obj(Module).name)
+			ELSIF ident.obj.class = cConst THEN
+				WriteInt(symfile, cConst);
+				WriteStr(symfile, ident.name);
+				WriteInt(symfile, ident.obj(Const).val);
+				DetectType(ident.obj.type)
+			ELSIF ident.obj.class = cType THEN
+				WriteInt(symfile, cType);
+				WriteStr(symfile, ident.name);
+				DetectType(obj.type)
+			ELSIF ident.obj.class = cVar THEN
+				WriteInt(symfile, cVar);
+				WriteStr(symfile, ident.name);
+				NewExport(exp); exp.obj := ident.obj;
 				WriteInt (symfile, expno);
-				Detect_type (obj.type)
-			ELSIF obj.class = cProc THEN
-				WriteInt (symfile, cProc);
-				WriteStr (symfile, obj.name);
-				INC (expno); obj.expno := expno;
-				WriteInt (symfile, expno);
-				Export_proc (obj.type)
+				DetectType(ident.obj.type)
+			ELSIF ident.obj.class = cProc THEN
+				WriteInt(symfile, cProc);
+				WriteStr(symfile, ident.name);
+				NewExport(exp); exp.obj := ident.obj;
+				WriteInt(symfile, expno);
+				ExportProc(ident.obj.type)
 			ELSE ASSERT(FALSE)
 			END
 		END;
-		obj := obj.next
+		ident := ident.next
 	END;
-	WriteInt (symfile, cHead);
+	WriteInt(symfile, cNull);
 	
-	size := FilePos(symfile); Seek (symfile, 0);
+	(*size := FilePos(symfile); Seek (symfile, 0);
 	Crypt.InitMD5Hash (hash); i := 0;
 	REPEAT k := 0;
 		REPEAT Read_byte (symfile, n); chunk[k] := n; INC (i); INC (k)
 		UNTIL (i = size) OR (k = 64);
 		Crypt.MD5ComputeChunk (hash, chunk, k * 8)
-	UNTIL i = size;
+	UNTIL i = size;*)
 	
-	Seek (symfile, 0);
+	(*Seek (symfile, 0);
 	module.key[0] := Crypt.MD5GetLowResult(hash);
 	module.key[1] := Crypt.MD5GetHighResult(hash);
-	Write_module_key (module.key);
+	Write_module_key (module.key);*)
 	Close (symfile)
 END Write_symbols_file;
 
