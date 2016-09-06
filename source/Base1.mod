@@ -1,11 +1,9 @@
 MODULE Base1;
 
 IMPORT
-	SYSTEM, Kernel32, Console;
+	SYSTEM, Kernel32, Console, Crypt;
 
 CONST
-	WordSize* = 8; CharSize* = 2; MaxChar* = 65535; MaxSet* = 64;
-	MaxInt* = 9223372036854775807; MinInt* = -MaxInt - 1;
 	MaxIdLen* = 63; MaxStrLen* = 255;
 	MaxExt* = 8; MaxRecTypes* = 512;
 	MaxImpMod* = 256; MaxExpTypes* = 1024;
@@ -26,6 +24,7 @@ TYPE
 	FileHandle* = RECORD handle: Kernel32.HANDLE END;
 	IdStr* = ARRAY MaxIdLen+1 OF CHAR;
 	String* = ARRAY MaxStrLen+1 OF CHAR;
+	ModuleKey* = ARRAY 2 OF INTEGER;
 	
 	Type* = POINTER TO TypeDesc;
 	Object* = POINTER TO ObjDesc;
@@ -46,11 +45,13 @@ TYPE
 		chars*: String; len*: INTEGER
 	END;
 	Module* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
-		export*: BOOLEAN; first*: Ident; name*: B.IdStr; lev*: INTEGER
+		export*: BOOLEAN;
+		name*: IdStr; key*: ModuleKey;
+		lev*: INTEGER; first*: Ident
 	END;
 	
 	IdentDesc* = RECORD
-		export: BOOLEAN;
+		export*: BOOLEAN;
 		name*: IdStr; obj*: Object;
 		next*: Ident
 	END;
@@ -63,12 +64,10 @@ TYPE
 	
 	TypeDesc* = RECORD
 		form*, size*, align*, nptr*: INTEGER;
-		len*, adr*, lev*: INTEGER; base*: Type; fields*: Ident;
+		len*, lev*, adr*: INTEGER; base*: Type; fields*: Ident;
 		parblksize*, nfpar*: INTEGER;
-		mod*, ref*: INTEGER
+		mod*, ref*: INTEGER (* import/export *)
 	END;
-	
-	MarkProcedure* = PROCEDURE(msg: ARRAY OF CHAR);
 
 VAR
 	(* Predefined Types *)
@@ -77,13 +76,15 @@ VAR
 	predefinedTypes: ARRAY 32 OF Type;
 	
 	topScope*, universe*: Scope;
-	curLev*, sbufsz*: INTEGER;
+	curLev*, modlev*: INTEGER;
+	modkey*: ModuleKey;
 	
+	symfile: FileHandle;
 	refno, preTypeNo, expno, nmod: INTEGER;
 	expList*: Ident;
 	modList*: ARRAY MaxImpMod OF Module;
 	
-	Mark: MarkProcedure;
+	ExportType0: PROCEDURE(typ: Type);
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -323,15 +324,41 @@ BEGIN buf := Kernel32.GetCommandLineW(); i := 0;
 	IF k < LEN(out) THEN out[k] := 0X END
 END GetArg;
 
+PROCEDURE WriteInt* (VAR f: FileHandle; n: INTEGER);
+	VAR finish: BOOLEAN; b: INTEGER;
+BEGIN
+	REPEAT b := n MOD 128; finish := (n >= -64) & (n < 64);
+		IF finish THEN b := b + 128 ELSE n := n DIV 128 END;
+		Write_byte (f, b)
+	UNTIL finish
+END WriteInt;
+
+PROCEDURE ReadInt* (VAR f: FileHandle; VAR n: INTEGER);
+	CONST MaxInt = 9223372036854775807; MinInt = -MaxInt - 1;
+	VAR finish: BOOLEAN; i, b, k: INTEGER;
+BEGIN n := 0; i := 1; k := 1;
+	REPEAT Read_byte (f, b);
+		IF i < 10 THEN
+			finish := b >= 128; b := b MOD 128; n := n + b * k;
+			IF i # 9 THEN k := k * 128 END; INC (i);
+			IF finish & (b >= 64) THEN
+				IF i # 9 THEN n := n + (-1 * k) ELSE n := n + MinInt END
+			END
+		ELSIF i = 10 THEN
+			finish := TRUE; IF b = 127 THEN n := n + MinInt END
+		ELSE ASSERT(FALSE)
+		END
+	UNTIL finish
+END ReadInt;
+
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 	
-PROCEDURE NewVar*(tp: Type; VAR varblksize: INTEGER): Var;
-	VAR v: Var; adr: INTEGER;
+PROCEDURE NewVar*(tp: Type): Var;
+	VAR v: Var;
 BEGIN
-	NEW(v); v.class := cVar; v.type := tp; v.ronly := FALSE; v.par := FALSE;
-	adr := -varblksize - tp.size; adr := adr - adr MOD tp.align;
-	v.adr := adr; v.lev := curLev; varblksize := -adr;
+	NEW(v); v.class := cVar; v.type := tp; v.lev := curLev;
+	v.ronly := FALSE; v.par := FALSE;
 	RETURN v
 END NewVar;
 
@@ -342,42 +369,36 @@ BEGIN
 	RETURN c
 END NewConst;
 
-PROCEDURE NewPar*(proc: Type; cls: INTEGER; ronly: BOOLEAN; tp: Type): Var;
-	VAR v: Var; parsize: INTEGER;
+PROCEDURE NewPar*(proc, tp: Type; cls: INTEGER; ronly: BOOLEAN): Var;
+	VAR v: Var;
 BEGIN
-	IF (cls = cRef) & (tp.form = tRec)
-	OR (tp.form = tArray) & (tp.len = 0)
-	THEN parsize := WordSize * 2 ELSE parsize := WordSize
-	END;
-	NEW(v); v.class := cls; v.type := tp;
-	v.adr := proc.parblksize; v.ronly := ronly; v.par := TRUE;
-	proc.parblksize := proc.parblksize + parsize; INC(proc.nfpar);
+	NEW(v); v.class := cls; v.type := tp; v.lev := curLev;
+	v.ronly := ronly; v.par := TRUE;
+	INC(proc.nfpar);
 	RETURN v
 END NewPar;
 
 PROCEDURE NewField*(rec, tp: Type): Field;
-	VAR fld: Field; off: INTEGER;
+	VAR fld: Field;
 BEGIN
 	NEW(fld); fld.class := cField; fld.type := tp;
-	off := rec.size; off := off + (-off) MOD tp.align;
-	fld.off := off; rec.size := off + tp.size; rec.nptr := rec.nptr + tp.nptr;
-	IF rec.align < tp.align THEN rec.align := tp.align END
+	rec.nptr := rec.nptr + tp.nptr;
+	RETURN fld
 END NewField;
 
 PROCEDURE NewStr*(str: String; slen: INTEGER): Str;
 	VAR x: Str;
 BEGIN
-	NEW(x); x.class := cVar; x.type := strType; x.lev := 0; x.par := FALSE;
-	x.ronly := TRUE; x.adr := sbufsz; x.chars := str; x.len := slen;
-	sbufsz := sbufsz + slen*CharSize;
+	NEW(x); x.class := cVar; x.type := strType; x.lev := 0;
+	x.par := FALSE; x.ronly := TRUE;
+	x.chars := str; x.len := slen;
 	RETURN x
 END NewStr;
 
 PROCEDURE NewProc*(): Proc;
 	VAR p: Proc;
 BEGIN
-	NEW(p); p.class := cProc;
-	p.lev := curLev; p.locblksize := 0
+	NEW(p); p.class := cProc; p.lev := curLev;
 	RETURN p
 END NewProc;
 
@@ -386,8 +407,7 @@ END NewProc;
 
 PROCEDURE NewType*(VAR typ: Type; form: INTEGER);
 BEGIN
-	NEW(typ); typ.form := form;
-	typ.nptr := 0; tp.align := 0; tp.size := 0;
+	NEW(typ); typ.form := form; typ.nptr := 0;
 	typ.mod := -1; typ.ref := -1
 END NewType;
 
@@ -398,18 +418,6 @@ BEGIN
 	RETURN tp
 END NewArray;
 
-PROCEDURE CalculateArraySize*(arrType, lastArray: Type);
-BEGIN
-	IF arrType # lastArray THEN
-		CalculateArraySize(arrType.base, lastArray)
-	END;
-	arrType.size := arrType.len * arrType.base.size;
-	arrType.nptr := arrType.len * arrType.base.nptr;
-	IF arrType.align < arrType.base.align THEN
-		arrType.align := arrType.base.align
-	END
-END CalculateArraySize;
-
 PROCEDURE NewRecord*(): Type;
 	VAR tp: Type;
 BEGIN
@@ -419,8 +427,6 @@ END NewRecord;
 
 PROCEDURE ExtendRecord*(recType: Type);
 BEGIN
-	recType.size := recType.base.size;
-	recType.align := recType.base.align;
 	recType.len := recType.base.len + 1;
 	recType.nptr := recType.base.nptr
 END ExtendRecord;
@@ -428,36 +434,43 @@ END ExtendRecord;
 PROCEDURE NewPointer*(): Type;
 	VAR tp: Type;
 BEGIN
-	NewType(tp, tPtr); tp.size := WordSize;
-	tp.align := WordSize; tp.nptr := 1;
+	NewType(tp, tPtr); tp.nptr := 1;
 	RETURN tp
 END NewPointer;
 
 PROCEDURE NewProcType*(): Type;
 	VAR tp: Type;
 BEGIN
-	NewType(tp, tProc); tp.size := WordSize; tp.align := WordSize;
-	tp.parblksize := 0; tp.nfpar := 0;
+	NewType(tp, tProc); tp.nfpar := 0;
 	RETURN tp
 END NewProcType;
 
-PROCEDURE NewPredefinedType(VAR typ: Type; form, size: INTEGER);
+PROCEDURE NewPredefinedType(VAR typ: Type; form: INTEGER);
 BEGIN
-	NewType(typ, form);
-	typ.mod := -2; typ.size := size; typ.align := size;
-	INC(preTypeNo); predefinedTypes[preTypeNo] := typ;
-	typ.ref := preTypeNo
+	NewType(typ, form); INC(preTypeNo);
+	typ.mod := -2; typ.ref := preTypeNo;
+	predefinedTypes[preTypeNo] := typ
 END NewPredefinedType;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 (* Export symbol file *)
 
+PROCEDURE NewExport(VAR ident: Ident);
+	VAR p: Ident;
+BEGIN NEW(ident); INC(expno);
+	IF expList = NIL THEN expList := ident
+	ELSE p := expList;
+		WHILE p.next # NIL DO p := p.next END;
+		p.next := ident
+	END
+END NewExport;
+
 PROCEDURE DetectType(typ: Type);
 BEGIN
 	IF typ # NIL THEN
 		WriteInt(symfile, typ.mod); WriteInt(symfile, typ.ref);
-		IF typ.mod >= 0 THEN WriteStr(modList[typ.mod].name) END;
+		IF typ.mod >= 0 THEN WriteStr(symfile, modList[typ.mod].name) END;
 		IF (typ.mod = -1) & (typ.ref < 0) THEN ExportType0(typ) END
 	ELSE WriteInt(symfile, -2); WriteInt(symfile, 0)
 	END
@@ -466,12 +479,11 @@ END DetectType;
 PROCEDURE ExportProc(typ: Type);
 	VAR par: Ident; x: Var;
 BEGIN
-	DetectType(typ.base); WriteInt (symfile, typ.len);
-	WriteInt (symfile, typ.parblksize); par := typ.fields;
+	DetectType(typ.base); WriteInt(symfile, typ.nfpar); par := typ.fields;
 	WHILE par # NIL DO x := par.obj(Var);
 		WriteInt(symfile, x.class);
 		WriteStr(symfile, par.name);
-		WriteInt(ORD(x.ronly));
+		WriteInt(symfile, ORD(x.ronly));
 		DetectType(x.type);
 		par := par.next
 	END;
@@ -482,21 +494,19 @@ PROCEDURE ExportType(typ: Type);
 	VAR fld, ident: Ident; i: INTEGER; s: String;
 BEGIN
 	IF refno < MaxExpTypes THEN typ.ref := refno; INC(refno)
-	ELSE Mark('Compiler limit: Too many exported types')
+	ELSE (* stub *)
 	END;
 	WriteInt(symfile, typ.ref);
 	IF typ.form = tRec THEN 
 		NewExport(ident); NEW(ident.obj); ident.obj.class := cType;
-		ident.obj.type := typ; WriteInt(expno)
+		ident.obj.type := typ; WriteInt(symfile, expno)
 	ELSE WriteInt(symfile, 0)
 	END;
 	WriteInt(symfile, typ.form);
 	IF typ.form = tRec THEN
 		DetectType(typ.base);
 		WriteInt(symfile, typ.len);
-		WriteInt(symfile, typ.size);
 		WriteInt(symfile, typ.nptr);
-		WriteInt(symfile, typ.align);
 		i := 0; fld := typ.fields;
 		WHILE fld # NIL DO
 			IF fld.export OR (fld.obj.type.nptr > 0) THEN
@@ -504,8 +514,7 @@ BEGIN
 				IF ~fld.export THEN s[0] := 0X; WriteStr(symfile, s)
 				ELSE WriteStr(symfile, fld.name)
 				END;
-				DetectType(fld.type);
-				WriteInt(symfile, fld.obj(Field).off)
+				DetectType(fld.obj.type)
 			END;
 			fld := fld.next
 		END;
@@ -513,9 +522,7 @@ BEGIN
 	ELSIF typ.form = tArray THEN
 		DetectType (typ.base);
 		WriteInt(symfile, typ.len);
-		WriteInt(symfile, typ.size);
-		WriteInt(symfile, typ.nptr);
-		WriteInt(symfile, typ.align)
+		WriteInt(symfile, typ.nptr)
 	ELSIF typ.form = tPtr THEN
 		DetectType(typ.base)
 	ELSIF typ.form = tProc THEN
@@ -523,35 +530,33 @@ BEGIN
 	END
 END ExportType;
 
-(*PROCEDURE Write_module_key (key: ModuleKey);
+PROCEDURE WriteModkey(key: ModuleKey);
 BEGIN
 	Write_8bytes(symfile, key[0]);
 	Write_8bytes(symfile, key[1])
-END Write_module_key;*)
+END WriteModkey;
 
-PROCEDURE Write_symbols_file*;
+PROCEDURE WriteSymfile*;
 	VAR ident, exp: Ident; i, k, n, size: INTEGER; mod: Module;
 		hash: Crypt.MD5Hash; chunk: ARRAY 64 OF BYTE;
 BEGIN
 	refno := 0; expno := 0;
 	Rewrite(symfile, 'sym.temp_'); Seek(symfile, 16);
-	WriteInt (symfile, module.lev);
+	WriteInt (symfile, modlev);
 	
 	FOR i := 0 TO nmod-1 DO
 		mod := modList[0];
 		IF mod.export THEN
 			WriteInt(symfile, cModule);
-			WriteStr(symfile, mod.name)
+			WriteStr(symfile, mod.name);
+			WriteModkey(mod.key)
 		END
 	END;
 	
 	ident := universe.first;
 	WHILE ident # NIL DO
 		IF ident.export THEN
-			IF ident.obj.class = cModule THEN
-				WriteInt(symfile, cModule);
-				WriteStr(symfile, ident.obj(Module).name)
-			ELSIF ident.obj.class = cConst THEN
+			IF ident.obj.class = cConst THEN
 				WriteInt(symfile, cConst);
 				WriteStr(symfile, ident.name);
 				WriteInt(symfile, ident.obj(Const).val);
@@ -559,7 +564,7 @@ BEGIN
 			ELSIF ident.obj.class = cType THEN
 				WriteInt(symfile, cType);
 				WriteStr(symfile, ident.name);
-				DetectType(obj.type)
+				DetectType(ident.obj.type)
 			ELSIF ident.obj.class = cVar THEN
 				WriteInt(symfile, cVar);
 				WriteStr(symfile, ident.name);
@@ -579,20 +584,20 @@ BEGIN
 	END;
 	WriteInt(symfile, cNull);
 	
-	(*size := FilePos(symfile); Seek (symfile, 0);
-	Crypt.InitMD5Hash (hash); i := 0;
+	size := FilePos(symfile); Seek(symfile, 0);
+	Crypt.InitMD5Hash(hash); i := 0;
 	REPEAT k := 0;
-		REPEAT Read_byte (symfile, n); chunk[k] := n; INC (i); INC (k)
+		REPEAT Read_byte(symfile, n); chunk[k] := n; INC(i); INC(k)
 		UNTIL (i = size) OR (k = 64);
-		Crypt.MD5ComputeChunk (hash, chunk, k * 8)
-	UNTIL i = size;*)
+		Crypt.MD5ComputeChunk(hash, chunk, k * 8)
+	UNTIL i = size;
 	
-	(*Seek (symfile, 0);
-	module.key[0] := Crypt.MD5GetLowResult(hash);
-	module.key[1] := Crypt.MD5GetHighResult(hash);
-	Write_module_key (module.key);*)
-	Close (symfile)
-END Write_symbols_file;
+	Seek(symfile, 0);
+	modkey[0] := Crypt.MD5GetLowResult(hash);
+	modkey[1] := Crypt.MD5GetHighResult(hash);
+	WriteModkey(modkey);
+	Close(symfile)
+END WriteSymfile;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -610,24 +615,22 @@ PROCEDURE IncLev*(n: INTEGER);
 BEGIN curLev := curLev + n
 END IncLev;
 
-PROCEDURE InstallMark*(mark: MarkProcedure);
-BEGIN Mark := mark
-END InstallMark;
-
 PROCEDURE Init*;
 BEGIN
-	NEW(universe); topScope := universe; curLev := 0; sbufsz := 0
+	NEW(universe); topScope := universe; curLev := 0; nmod := -1
 END Init;
 
 BEGIN
+	ExportType0 := ExportType;
+
 	preTypeNo := 0; predefinedTypes[0] := NIL; (* type no. 0 is no-type *)
-	NewPredefinedType(intType, tInt, WordSize);
-	NewPredefinedType(byteType, tInt, 1);
-	NewPredefinedType(boolType, tBool, 1);
-	NewPredefinedType(setType, tSet, WordSize);
-	NewPredefinedType(charType, tChar, CharSize);
-	NewPredefinedType(nilType, tNil, WordSize);
-	NewPredefinedType(realType, tReal, 4);
-	NewPredefinedType(longrealType, tReal, 8);
-	NewPredefinedType(strType, tStr, CharSize); strType.base := charType
+	NewPredefinedType(intType, tInt);
+	NewPredefinedType(byteType, tInt);
+	NewPredefinedType(boolType, tBool);
+	NewPredefinedType(setType, tSet);
+	NewPredefinedType(charType, tChar);
+	NewPredefinedType(nilType, tNil);
+	NewPredefinedType(realType, tReal);
+	NewPredefinedType(longrealType, tReal);
+	NewPredefinedType(strType, tStr)
 END Base1.

@@ -75,7 +75,7 @@ BEGIN
 END IsExt;
 
 PROCEDURE IsVarPar(x: B.Object): BOOLEAN;
-	RETURN (x IS B.Var) & x.par & (x.class = B.cRef)
+	RETURN (x IS B.Var) & x(B.Var).par & (x.class = B.cRef)
 END IsVarPar;
 
 PROCEDURE IsConst(x: B.Object): BOOLEAN;
@@ -625,10 +625,10 @@ BEGIN tp := B.intType;
 END FormalType;
 
 PROCEDURE FPSection(proc: B.Type);
-	VAR ref, ronly: BOOLEAN;
+	VAR ronly: BOOLEAN; cls: INTEGER;
 		first, ident: B.Ident; tp: B.Type;
 BEGIN
-	IF sym = S.var THEN ref := TRUE; GetSym ELSE ref := FALSE END;
+	IF sym = S.var THEN cls := B.cRef; GetSym ELSE cls := B.cVar END;
 	IF sym = S.ident THEN
 		first := NewIdent(S.id); GetSym;
 		WHILE sym = S.comma DO GetSym;
@@ -641,9 +641,9 @@ BEGIN
 	ELSE Mark('No params?')
 	END;
 	Check0(S.colon); tp := FormalType(); ident := first;
-	ronly := ~ref & (tp.form IN {B.tArray, B.tRec});
+	ronly := (cls = B.cVar) & (tp.form IN {B.tArray, B.tRec});
 	WHILE ident # NIL DO
-		ident.obj := B.NewPar(proc, ref, ronly, tp); ident := ident.next
+		ident.obj := B.NewPar(proc, tp, cls, ronly); ident := ident.next
 	END
 END FPSection;
 
@@ -738,8 +738,9 @@ END BaseType;
 
 PROCEDURE length(): INTEGER;
 	VAR x: B.Object; n: INTEGER;
-BEGIN x := ConstExpression(); n := 1;
+BEGIN x := ConstExpression(); n := 0;
 	IF x.type.form = B.tInt THEN n := x(B.Const).val ELSE Mark('not int') END;
+	IF n < 0 THEN Mark('invalid array length') END;
 	RETURN n
 END length;
 
@@ -759,7 +760,7 @@ BEGIN tp := B.intType;
 			ELSE Mark('remove ,')
 			END
 		END;
-		Check0(S.of); lastArr.base := type(); B.CalculateArraySize(tp, lastArr)
+		Check0(S.of); lastArr.base := type()
 	ELSIF sym = S.record THEN
 		tp := B.NewRecord(); GetSym;
 		IF sym = S.lparen THEN
@@ -785,7 +786,7 @@ BEGIN tp := B.intType;
 	RETURN tp
 END type;
 
-PROCEDURE DeclarationSequence(VAR varblksize: INTEGER);
+PROCEDURE DeclarationSequence;
 	VAR first, ident, par: B.Ident; x: B.Object; tp: B.Type;
 		proc: B.Proc; varobj: B.Var; statseq: B.Node;
 		undef, prev: UndefPtrList;
@@ -832,7 +833,7 @@ BEGIN
 			END;
 			Check0(S.colon); tp := type(); ident := first;
 			WHILE ident # NIL DO
-				ident.obj := B.NewVar(tp, varblksize); ident := ident.next
+				ident.obj := B.NewVar(tp); ident := ident.next
 			END;
 		END
 	END;
@@ -847,23 +848,22 @@ BEGIN
 			ident := NewIdent(par.name); NEW(varobj); ident.obj := varobj;
 			varobj^ := par.obj(B.Var)^; par := par.next
 		END;
-		ident := curProcIdent; DeclarationSequence(proc.locblksize);
+		ident := curProcIdent; DeclarationSequence();
 		curProcIdent := ident; proc.decl := B.topScope.first;
-		IF curProcIdent # NIL THEN curProcIdent.obj := proc END;
-		
+		IF curProcIdent # NIL THEN curProcIdent.obj := proc END;		
 		IF sym = S.begin THEN GetSym; proc.statseq := StatementSequence() END;
 		IF sym = S.return THEN
 			IF tp.base = NIL THEN Mark('not function proc') END;
 			x := expression(); proc.return := x;
 			IF x.type.form IN {B.tArray, B.tRec} THEN Mark('invalid type') END                
 		ELSIF tp.base # NIL THEN Missing(S.return)
-		END;
-		
+		END;	
 		B.CloseScope; B.IncLev(-1); Check0(S.end);
 		IF sym = S.ident THEN
 			IF (curProcIdent # NIL) & (curProcIdent.name # S.id) THEN
 				Mark('wrong proc ident')
-			END; GetSym
+			END;
+			GetSym
 		ELSIF curProcIdent # NIL THEN Missing(S.ident)
 		END;
 		Check0(S.semicolon)
@@ -872,10 +872,9 @@ END DeclarationSequence;
 
 PROCEDURE Module*;
 	VAR modid: B.IdStr; modinit: B.Node;
-		varblksize: INTEGER;
 BEGIN GetSym; modid[0] := 0X;
 	IF sym = S.ident THEN modid := S.id; GetSym ELSE Missing(S.ident) END;
-	Check0(S.semicolon); DeclarationSequence(varblksize);
+	Check0(S.semicolon); DeclarationSequence;
 	IF sym = S.begin THEN GetSym; modinit := StatementSequence() END;
 	Check0(S.end);
 	IF sym = S.ident THEN

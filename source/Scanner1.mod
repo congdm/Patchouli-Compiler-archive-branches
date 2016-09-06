@@ -26,6 +26,7 @@ IMPORT
   
 CONST
 	MaxIdLen = Base.MaxIdLen;
+	MaxInt = 9223372036854775807; MinInt = -MaxInt - 1;
     NKW = 37;  (* Number of keywords *)
     maxExp = 38; stringBufSize = 256;
   
@@ -166,7 +167,7 @@ BEGIN
 END Ten;
 
 PROCEDURE Number(VAR sym: INTEGER);
-    CONST max = Base.MaxInt;
+    CONST max = MaxInt;
 	VAR i, k2, e, n, s, h: INTEGER; x: REAL;
 		d: ARRAY 21 OF INTEGER;
 		negE: BOOLEAN;
@@ -349,7 +350,6 @@ BEGIN Base.StrCopy(name, keyTab[k].id); keyTab[k].sym := sym; INC(k)
 END EnterKW;
 
 BEGIN
-	Base.InstallMark(Mark);
 	k := 0; KWX[0] := 0; KWX[1] := 0;
 	EnterKW(if, 'IF');
 	EnterKW(do, 'DO');
