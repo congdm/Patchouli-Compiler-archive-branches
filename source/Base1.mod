@@ -46,10 +46,15 @@ TYPE
 		chars*: String; len*: INTEGER
 	END;
 	Module* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
-		first*: Ident; name*: B.IdStr; lev*: INTEGER
+		export*: BOOLEAN; first*: Ident; name*: B.IdStr; lev*: INTEGER
 	END;
 	
-	IdentDesc* = RECORD name*: IdStr; obj*: Object; next*: Ident END;
+	IdentDesc* = RECORD
+		export: BOOLEAN;
+		name*: IdStr; obj*: Object;
+		next*: Ident
+	END;
+	
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
 	
 	NodeDesc* = EXTENSIBLE RECORD (ObjDesc)
@@ -57,10 +62,10 @@ TYPE
 	END;
 	
 	TypeDesc* = RECORD
-		form*, size*, align*: INTEGER;
-		len*: INTEGER; base*: Type; fields*: Ident;
+		form*, size*, align*, nptr*: INTEGER;
+		len*, adr*, lev*: INTEGER; base*: Type; fields*: Ident;
 		parblksize*, nfpar*: INTEGER;
-		mod*, ref*: INTEGER;
+		mod*, ref*: INTEGER
 	END;
 	
 	MarkProcedure* = PROCEDURE(msg: ARRAY OF CHAR);
@@ -74,7 +79,8 @@ VAR
 	topScope*, universe*: Scope;
 	curLev*, sbufsz*: INTEGER;
 	
-	refno, preTypeNo: INTEGER;
+	refno, preTypeNo, expno: INTEGER;
+	expList*: Ident;
 	modList*: ARRAY MaxImpMod OF Module;
 	
 	Mark: MarkProcedure;
@@ -406,7 +412,7 @@ END CalculateArraySize;
 PROCEDURE NewRecord*(): Type;
 	VAR tp: Type;
 BEGIN
-	NewType(tp, tRec); tp.len := 0;
+	NewType(tp, tRec); tp.len := 0; tp.lev := curLev;
 	RETURN tp
 END NewRecord;
 
@@ -449,7 +455,7 @@ BEGIN
 	IF typ # NIL THEN
 		WriteInt(symfile, typ.mod); WriteInt(symfile, typ.ref);
 		IF typ.mod >= 0 THEN WriteStr(modList[typ.mod].name) END;
-		IF typ.ref < 0 THEN Export_type0(typ) END
+		IF (typ.mod = -1) & (typ.ref < 0) THEN Export_type0(typ) END
 	ELSE WriteInt(symfile, -2); WriteInt(symfile, 0)
 	END
 END Detect_type;
@@ -470,34 +476,28 @@ BEGIN
 END Export_proc;
 	
 PROCEDURE Export_type(typ: Type);
-	VAR fld: Ident; i: INTEGER; s: String;
+	VAR fld, ident: Ident; i: INTEGER; s: String;
 BEGIN
-	IF typ.mod = -1 THEN
-		IF refno < MaxExpTypes THEN typ.ref := refno; INC(refno)
-		ELSE Mark('Compiler limit: Too many exported types')
-		END
-	ELSE typ.ref := -typ.ref - 1
+	IF refno < MaxExpTypes THEN typ.ref := refno; INC(refno)
+	ELSE Mark('Compiler limit: Too many exported types')
 	END;
 	WriteInt(symfile, typ.ref);
-	IF (typ.form # tRecord) OR typ.unsafe OR typ.obj.export THEN
-		WriteInt (symfile, 0)
-	ELSE
-		IF typ.obj.expno = 0 THEN INC (expno); typ.obj.expno := expno END;
-		WriteInt (symfile, typ.obj.expno)
+	IF typ.form = tRec THEN 
+		NewExport(ident); NEW(ident.obj); ident.obj.class := cType;
+		ident.obj.type := typ; WriteInt(expno)
+	ELSE WriteInt(symfile, 0)
 	END;
 	
-	WriteInt (symfile, typ.form);
-	IF typ.form = tRecord THEN
-		Detect_type (typ.base);
-		WriteInt (symfile, typ.len);
-		WriteInt (symfile, typ.size);
-		WriteInt (symfile, typ.nptr);
-		WriteInt (symfile, typ.alignment);
-		WriteInt (symfile, ORD(typ.extensible));
-		WriteInt (symfile, ORD(typ.unsafe));
+	WriteInt(symfile, typ.form);
+	IF typ.form = tRec THEN
+		Detect_type(typ.base);
+		WriteInt(symfile, typ.len);
+		WriteInt(symfile, typ.size);
+		WriteInt(symfile, typ.nptr);
+		WriteInt(symfile, typ.align);
 		
-		i := 0; field := typ.fields;
-		WHILE field # guard DO
+		i := 0; fld := typ.fields;
+		WHILE fld # NIL DO
 			IF field.export OR (field.type.nptr > 0) THEN
 				WriteInt (symfile, cField);
 				IF ~field.export THEN s[0] := 0X; WriteStr (symfile, s)
@@ -515,12 +515,10 @@ BEGIN
 		WriteInt (symfile, typ.size);
 		WriteInt (symfile, typ.nptr);
 		WriteInt (symfile, typ.alignment)
-	ELSIF typ.form = tPointer THEN
-		Detect_type (typ.base)
-	ELSIF typ.form = tProcedure THEN
-		Export_proc (typ)
-	ELSIF typ.form = tAddress THEN
-		Detect_type (typ.base)
+	ELSIF typ.form = tPtr THEN
+		Detect_type(typ.base)
+	ELSIF typ.form = tProc THEN
+		Export_proc(typ)
 	END
 END Export_type;
 
