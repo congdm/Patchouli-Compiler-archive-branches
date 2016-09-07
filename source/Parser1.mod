@@ -339,6 +339,57 @@ END designator;
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
+PROCEDURE StdFunc(f: B.SProc): B.Node;
+	VAR x, par, par2: B.Node; y: B.Object;
+BEGIN
+	x := NewNode(S.sproc, f, NIL); GetSym;
+	IF f.id = 'ABS' THEN y := expression0(); Check1(y, {B.tInt, B.tReal});
+		par := NewNode(S.par, y, NIL); x.right := par;
+		IF y.type.form = B.tInt THEN x.type := B.intType
+		ELSE x.type := y.type
+		END
+	ELSIF f.id = 'ODD' THEN y := expression0(); CheckInt(y);
+		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.boolType
+	ELSIF f.id = 'LEN' THEN y := designator(); Check1(y, {B.tArray});
+		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
+	ELSIF (f.id = 'LSL') OR (f.id = 'ASR') OR (f.id = 'ROR') THEN
+		x.type := B.intType; y := expression0(); CheckInt(y);
+		par := NewNode(S.par, y, NIL); x.right := par;
+		Check0(S.comma); y := expression0(); CheckInt(y);
+		par2 := NewNode(S.par, y, NIL); par.right := par2
+	ELSIF f.id = 'FLOOR' THEN y := expression0(); CheckReal(y);
+		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
+	ELSIF f.id = 'FLT' THEN y := expression0(); CheckInt(y);
+		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.realType
+	ELSIF f.id = 'ORD' THEN
+		y := expression0(); Check1(y, {B.tSet, B.tBool, B.tChar});
+		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
+	ELSIF f.id = 'CHR' THEN y := expression0(); CheckInt(y);
+		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.charType
+	ELSIF f.id = 'ADR' THEN y := designator();
+		IF ~((y.class >= B.cNode) & (y.class <= B.cRef)) THEN
+			Mark('not var')
+		END;
+		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
+	ELSIF f.id = 'SIZE' THEN y := qualident();
+		IF y.class # B.cType THEN Mark('not type') END;
+		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
+	ELSIF f.id = 'BIT' THEN
+		x.type := B.boolType; y := expression0(); CheckInt(y);
+		par := NewNode(S.par, y, NIL); x.right := par;
+		Check0(S.comma); y := expression0(); CheckInt(y);
+		par2 := NewNode(S.par, y, NIL); par.right := par2
+	ELSIF f.id = 'VAL THEN y := qualident();
+		IF y.class # B.cType THEN Mark('not type')
+		ELSIF y.type.form IN {B.tArray, B.tRec} THEN Mark('not scalar')
+		END;
+		par := NewNode(S.par, y, NIL); x.right := par; x.type := y.type;
+		Check0(S.comma); y := expression0();
+		IF y.type.form IN {B.tArray, B.tRec} THEN Mark('not scalar') END;
+		par2 := NewNode(S.par, y, NIL); par.right := par2
+	END
+END StdFunc;
+
 PROCEDURE element(): B.Object;
 	VAR x, y: B.Object;
 BEGIN
@@ -378,7 +429,14 @@ BEGIN
 	ELSIF sym = S.false THEN x := B.NewConst(B.boolType, 0); GetSym
 	ELSIF sym = S.lbrace THEN x := set()
 	ELSIF sym = S.ident THEN x := designator();
-		IF (sym = S.lparen) & (x.type.form = B.tProc) THEN
+		IF x.class = B.cSProc THEN Mark('not function');
+			x := B.NewConst(B.intType, 0)
+		ELSIF x.class = B.cSFunc THEN
+			IF sym # S.lparen THEN Mark('invalid factor');
+				x := B.NewConst(B.intType, 0)
+			ELSE x := StdFunc(x(B.SProc))
+			END
+		ELSIF (sym = S.lparen) & (x.type.form = B.tProc) THEN
 			IF x.type.base = NIL THEN Mark('not function') END;
 			x := Call(x); IF x.type = NIL THEN x.type := B.intType END
 		END
