@@ -49,6 +49,7 @@ TYPE
 		name*: IdStr; key*: ModuleKey;
 		lev*: INTEGER; first*: Ident
 	END;
+	SProc* = POINTER TO EXTENSIBLE RECORD (ObjDesc) id*: IdStr END;
 	
 	IdentDesc* = RECORD
 		export*: BOOLEAN;

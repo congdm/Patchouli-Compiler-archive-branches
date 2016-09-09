@@ -132,6 +132,11 @@ BEGIN
 	IF x.type # B.setType THEN Mark('not set') END
 END CheckSet;
 
+PROCEDURE CheckReal(x: B.Object);
+BEGIN
+	IF x.type.form # B.tReal THEN Mark('not real number') END
+END CheckReal;
+
 PROCEDURE TypeTestable(x: B.Object): BOOLEAN;
 	RETURN (x.type.form = B.tPtr) & (x.type.base # NIL)
 	OR (x.type.form = B.tRec) & IsVarPar(x)
@@ -379,7 +384,7 @@ BEGIN
 		par := NewNode(S.par, y, NIL); x.right := par;
 		Check0(S.comma); y := expression0(); CheckInt(y);
 		par2 := NewNode(S.par, y, NIL); par.right := par2
-	ELSIF f.id = 'VAL THEN y := qualident();
+	ELSIF f.id = 'VAL' THEN y := qualident();
 		IF y.class # B.cType THEN Mark('not type')
 		ELSIF y.type.form IN {B.tArray, B.tRec} THEN Mark('not scalar')
 		END;
@@ -387,7 +392,8 @@ BEGIN
 		Check0(S.comma); y := expression0();
 		IF y.type.form IN {B.tArray, B.tRec} THEN Mark('not scalar') END;
 		par2 := NewNode(S.par, y, NIL); par.right := par2
-	END
+	END;
+	RETURN x
 END StdFunc;
 
 PROCEDURE element(): B.Object;

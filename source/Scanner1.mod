@@ -48,7 +48,7 @@ CONST
 	return* = 75; import* = 76; module* = 77;
 	extensible* = 80; definition* = 81;
 	
-	call* = 100; par* = 101;
+	call* = 100; par* = 101; sproc* = 102;
 
 VAR
 	ival*, slen*: INTEGER;
