@@ -403,6 +403,12 @@ BEGIN
 	RETURN p
 END NewProc;
 
+PROCEDURE NewTypeObj*(tp: Type): Object;
+	VAR x: Object;
+BEGIN
+	NEW(x); x.class := cType; x.type := tp
+END NewTypeObj;
+
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
@@ -452,6 +458,30 @@ BEGIN
 	typ.mod := -2; typ.ref := preTypeNo;
 	predefinedTypes[preTypeNo] := typ
 END NewPredefinedType;
+
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE OpenScope*;
+	VAR scp: Scope;
+BEGIN NEW(scp); scp.dsc := topScope; topScope := scp
+END OpenScope;
+
+PROCEDURE CloseScope*;
+BEGIN topScope := topScope.dsc
+END CloseScope;
+
+PROCEDURE IncLev*(n: INTEGER);
+BEGIN curLev := curLev + n
+END IncLev;
+
+PROCEDURE Enter (x: Object; name: IdStr);
+	VAR ident: Ident;
+BEGIN
+	NEW(ident); ident.name := name; ident.export := FALSE;
+	ident.obj := x; ident.next := topScope.first; topScope.first := ident
+END Enter;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -600,25 +630,11 @@ BEGIN
 	Close(symfile)
 END WriteSymfile;
 
-(* -------------------------------------------------------------------------- *)
-(* -------------------------------------------------------------------------- *)
-
-PROCEDURE OpenScope*;
-	VAR scp: Scope;
-BEGIN NEW(scp); scp.dsc := topScope; topScope := scp
-END OpenScope;
-
-PROCEDURE CloseScope*;
-BEGIN topScope := topScope.dsc
-END CloseScope;
-
-PROCEDURE IncLev*(n: INTEGER);
-BEGIN curLev := curLev + n
-END IncLev;
-
 PROCEDURE Init*;
 BEGIN
-	NEW(universe); topScope := universe; curLev := 0; nmod := -1
+	NEW(universe); topScope := universe; curLev := 0; nmod := -1;
+	
+	
 END Init;
 
 BEGIN
