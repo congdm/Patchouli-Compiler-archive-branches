@@ -16,6 +16,7 @@ CONST
 	(* Type form *)
 	tInt* = 0; tBool* = 1; tSet* = 2; tChar* = 3; tReal* = 4;
 	tPtr* = 5; tProc* = 6; tArray* = 7; tRec* = 8; tStr* = 9; tNil* = 10;
+	tNull* = 31;
 	
 	typEql* = {tBool, tSet, tPtr, tProc, tNil};
 	typCmp* = {tInt, tReal, tChar, tStr};
@@ -60,7 +61,7 @@ TYPE
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
 	
 	NodeDesc* = EXTENSIBLE RECORD (ObjDesc)
-		op*: INTEGER; left*, right*: Object
+		op*: INTEGER; left*, right*, org*: Object
 	END;
 	
 	TypeDesc* = RECORD
@@ -74,7 +75,7 @@ VAR
 	(* Predefined Types *)
 	intType*, byteType*, realType*, longrealType*: Type;
 	boolType*, setType*, charType*, nilType*, strType*: Type;
-	predefinedTypes: ARRAY 32 OF Type;
+	noType*: Type; predefinedTypes: ARRAY 32 OF Type;
 	
 	topScope*, universe*: Scope;
 	curLev*, modlev*: INTEGER;
@@ -406,8 +407,16 @@ END NewProc;
 PROCEDURE NewTypeObj*(tp: Type): Object;
 	VAR x: Object;
 BEGIN
-	NEW(x); x.class := cType; x.type := tp
+	NEW(x); x.class := cType; x.type := tp;
+	RETURN x
 END NewTypeObj;
+
+PROCEDURE NewSProc*(name: IdStr; cls: INTEGER): SProc;
+	VAR x: SProc;
+BEGIN
+	NEW(x); x.id := name; x.class := cls; x.type := noType;
+	RETURN x
+END NewSProc;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -634,7 +643,23 @@ PROCEDURE Init*;
 BEGIN
 	NEW(universe); topScope := universe; curLev := 0; nmod := -1;
 	
+	Enter(NewTypeObj(intType), 'INTEGER');
+	Enter(NewTypeObj(byteType), 'BYTE');
+	Enter(NewTypeObj(realType), 'REAL');
+	Enter(NewTypeObj(setType), 'SET');
+	Enter(NewTypeObj(boolType), 'BOOLEAN');
+	Enter(NewTypeObj(charType), 'CHAR');
 	
+	Enter(NewSProc('ABS', cSFunc), 'ABS');
+	Enter(NewSProc('ODD', cSFunc), 'ODD');
+	Enter(NewSProc('LEN', cSFunc), 'LEN');
+	Enter(NewSProc('LSL', cSFunc), 'LSL');
+	Enter(NewSProc('ASR', cSFunc), 'ASR');
+	Enter(NewSProc('ROR', cSFunc), 'ROR');
+	Enter(NewSProc('FLOOR', cSFunc), 'FLOOR');
+	Enter(NewSProc('FLT', cSFunc), 'FLT');
+	Enter(NewSProc('ORD', cSFunc), 'ORD');
+	Enter(NewSProc('CHR', cSFunc), 'CHR')
 END Init;
 
 BEGIN
@@ -649,5 +674,6 @@ BEGIN
 	NewPredefinedType(nilType, tNil);
 	NewPredefinedType(realType, tReal);
 	NewPredefinedType(longrealType, tReal);
-	NewPredefinedType(strType, tStr)
+	NewPredefinedType(strType, tStr);
+	NewPredefinedType(noType, tNull)
 END Base1.
