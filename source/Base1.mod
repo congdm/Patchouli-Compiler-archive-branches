@@ -640,6 +640,12 @@ BEGIN
 	Close(symfile)
 END WriteSymfile;
 
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+(* Import symbol file *)
+
+
+
 PROCEDURE Init*;
 BEGIN
 	NEW(universe); topScope := universe; curLev := 0; nmod := -1;
@@ -650,6 +656,15 @@ BEGIN
 	Enter(NewTypeObj(setType), 'SET');
 	Enter(NewTypeObj(boolType), 'BOOLEAN');
 	Enter(NewTypeObj(charType), 'CHAR');
+	
+	Enter(NewSProc('INC', cSProc), 'INC');
+	Enter(NewSProc('DEC', cSProc), 'DEC');
+	Enter(NewSProc('INCL', cSProc), 'INCL');
+	Enter(NewSProc('EXCL', cSProc), 'EXCL');
+	Enter(NewSProc('NEW', cSProc), 'NEW');
+	Enter(NewSProc('ASSERT', cSProc), 'ASSERT');
+	Enter(NewSProc('PACK', cSProc), 'PACK');
+	Enter(NewSProc('UNPK', cSProc), 'UNPK');
 	
 	Enter(NewSProc('ABS', cSFunc), 'ABS');
 	Enter(NewSProc('ODD', cSFunc), 'ODD');

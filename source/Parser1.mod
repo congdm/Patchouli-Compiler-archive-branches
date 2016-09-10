@@ -592,6 +592,25 @@ BEGIN
 			GetSym; y := designator(); CheckInt(y); CheckVar(y, FALSE);
 			par2 := NewNode(S.par, y, NIL); par.right := par2
 		END
+	ELSIF f.id = 'GET' THEN
+		y := expression(); CheckInt(y);
+		par := NewNode(S.par, y, NIL); x.right := par;
+		Check0(S.comma); y := designator(); CheckVar(y, FALSE);
+		IF y.type.form IN {B.tArray, B.tRec} THEN Mark('invalid type') END;
+		par2 := NewNode(S.par, y, NIL); par.right := par2
+	ELSIF f.id = 'PUT' THEN
+		y := expression(); CheckInt(y);
+		par := NewNode(S.par, y, NIL); x.right := par;
+		Check0(S.comma); y := expression();
+		IF y.type.form IN {B.tArray, B.tRec} THEN Mark('invalid type') END;
+		par2 := NewNode(S.par, y, NIL); par.right := par2
+	ELSIF f.id = 'COPY' THEN
+		y := expression(); CheckInt(y);
+		par := NewNode(S.par, y, NIL); x.right := par;
+		Check0(S.comma); y := expression(); CheckInt(y);
+		par2 := NewNode(S.par, y, NIL); par.right := par2; par := par2;
+		Check0(S.comma); y := expression(); CheckInt(y);
+		par2 := NewNode(S.par, y, NIL); par.right := par2
 	END;
 	RETURN x
 END StdProc;
