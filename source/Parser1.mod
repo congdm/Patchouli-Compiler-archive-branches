@@ -186,8 +186,11 @@ END Check1;
 
 PROCEDURE CheckVar(x: B.Object; ronly: BOOLEAN);
 BEGIN
-	IF ~((y.class >= B.cNode) & (y.class <= B.cRef)) THEN Mark('not var')
-	ELSIF ~ronly & y(B.Var).ronly THEN Mark('read only')
+	IF (x.class = B.cVar) OR (x.class = B.cRef) THEN
+		IF ~ronly & x(B.Var).ronly THEN Mark('read only') END
+	ELSIF (x.class = B.cNode) & (x(B.Node).op = S.designator) THEN
+		IF ~ronly & x(B.Node).ronly THEN Mark('read only') END
+	ELSE Mark('not var')
 	END
 END CheckVar;
 
@@ -211,9 +214,18 @@ END NewIdent;
 PROCEDURE NewNode(op: INTEGER; x, y: B.Object): B.Node;
 	VAR z: B.Node;
 BEGIN
-	NEW(z); z.class := B.cNode; z.op := op; z.left := x; z.right := y;
+	NEW(z); z.class := B.cNode; z.op := op;
+	z.left := x; z.right := y; z.ronly := FALSE;
 	RETURN z
 END NewNode;
+
+PROCEDURE NewDesignator(x: B.Object): B.Node;
+	VAR designator: B.Node;
+BEGIN
+	designator := NewNode(S.designator, x, NIL); designator.type := x.type;
+	IF x IS B.Var THEN designator.ronly := x(B.Var).ronly END;
+	RETURN designator
+END NewDesignator;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -290,8 +302,8 @@ BEGIN x := FindIdent();
 END qualident;
 
 PROCEDURE designator(): B.Object;
-	VAR x, y, org: B.Object; fid: B.IdStr; fld: B.Ident;
-		node: B.Node; recType, xtype, ytype: B.Type;
+	VAR x, y: B.Object; fid: B.IdStr; fld: B.Ident;
+		node, next: B.Node; recType, xtype, ytype: B.Type;
 BEGIN x := qualident();
 	IF (x = NIL) OR (x.class <= B.cType) THEN
 		x := B.NewConst(B.intType, 0); Mark('invalid value')
@@ -306,11 +318,9 @@ BEGIN x := qualident();
 			REPEAT fld := recType.fields;
 				WHILE (fld # NIL) & (fld.name # fid) DO fld := fld.next END;
 				IF fld # NIL THEN y := fld.obj;
-					node := NewNode(S.period, x, y); node.type := y.type;
-					IF x.class # B.cNode THEN node.org := x
-					ELSE node.org := x(B.Node).org
-					END;
-					x := node
+					IF node = NIL THEN node := NewDesignator(x); x := node END;
+					next := NewNode(S.period, y, NIL); node.right := next;
+					node := next; x.type := y.type
 				ELSIF recType.lev = 0 THEN Mark('Field not found')
 				ELSE recType := recType.base
 				END
@@ -319,39 +329,35 @@ BEGIN x := qualident();
 		END
 	ELSIF sym = S.lbrak DO
 		Check1(x, {B.tArray}); GetSym; y := expression0(); CheckInt(y);
-		xtype := x.type; x := NewNode(S.lbrak, x, y); x.type := xtype.base;
-		IF x.type = NIL THEN x.type := xtype END;
+		IF node = NIL THEN node := NewDesignator(x); x := node END;
+		next := NewNode(S.lbrak, y, NIL); node.right := next; node := next;
+		IF x.type.base # NIL THEN x.type := x.type.base END;
 		WHILE sym = S.comma DO
 			IF x.type.form # B.tArray THEN Mark('too many dimensions') END;
 			GetSym; y := expression0(); CheckInt(y);
-			node := NewNode(S.lbrak, x, y); node.type := x.type.base;
-			IF x.class # B.cNode THEN node.org := x
-			ELSE node.org := x(B.Node).org
-			END;
-			x := node; IF node.type = NIL THEN node.type := x.type END
+			next := NewNode(S.lbrak, y, NIL); node.right := next; node := next;
+			IF x.type.base # NIL THEN x.type := x.type.base END
 		END;
 		Check0(S.rbrak)
 	ELSIF sym = S.arrow DO
-		Check1(x, {B.tPtr}); node := NewNode(S.arrow, x, NIL);
-		IF x.class # B.cNode THEN node.org := x
-		ELSE node.org := x(B.Node).org
-		END;
-		IF x.type.base # NIL THEN node.type := x.type.base
-		ELSE Mark('undefined pointer'); node.type := x.type
-		END;
-		GetSym
+		Check1(x, {B.tPtr});
+		IF node = NIL THEN node := NewDesignator(x); x := node END;
+		next := NewNode(S.arrow, NIL, NIL); node.right := next; node := next;
+		IF x.type.base # NIL THEN x.type := x.type.base END;
+		x(B.Node).ronly := FALSE; GetSym
 	ELSIF (sym = S.lparen) & TypeTestable(x) DO
 		xtype := x.type; GetSym; y := NIL;
 		IF sym = S.ident THEN y := qualident() ELSE Missing(S.ident) END;
 		IF (y # NIL) & (y.class = B.cType) THEN ytype := y.type
-		ELSE Mark('not type'); ytype := x.type
+		ELSE Mark('not type'); ytype := xtype
 		END;
-		node := NewNode(S.lparen, x, y);
+		IF node = NIL THEN node := NewDesignator(x); x := node END;
+		next := NewNode(S.lparen, y, NIL); node.right := next; node := next;
 		IF (xtype.form = ytype.form) & IsExt(ytype, xtype) THEN
 			x.type := ytype
 		ELSIF (xtype.form = B.tRec) & IsExt(ytype, xtype) THEN
 			x.type := ytype.base
-		ELSE Mark('invalid type'); x.type := xtype
+		ELSE Mark('invalid type')
 		END;
 		Check0(S.rparen)
 	END;
@@ -567,7 +573,7 @@ BEGIN
 			par2 := NewNode(S.par, y, NIL); par.right := par2
 		END
 	ELSIF f.id = 'NEW' THEN
-		y := designator(); Check1({B.tPtr}); CheckVar(y, FALSE);
+		y := designator(); Check1(y, {B.tPtr}); CheckVar(y, FALSE);
 		par := NewNode(S.par, y, NIL); x.right := par
 	ELSIF f.id = 'ASSERT' THEN
 		y := expression(); CheckBool(y);

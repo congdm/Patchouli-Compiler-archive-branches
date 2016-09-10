@@ -61,8 +61,9 @@ TYPE
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
 	
 	NodeDesc* = EXTENSIBLE RECORD (ObjDesc)
-		op*: INTEGER; left*, right*, org*: Object
+		op*: INTEGER; left*, right*: Object; ronly*: BOOLEAN
 	END;
+	
 	
 	TypeDesc* = RECORD
 		form*, size*, align*, nptr*: INTEGER;
