@@ -902,7 +902,7 @@ BEGIN tp := B.intType;
 			ELSE Mark('remove ,')
 			END
 		END;
-		Check0(S.of); lastArr.base := type()
+		Check0(S.of); lastArr.base := type(); B.CompleteArray(tp)
 	ELSIF sym = S.record THEN
 		tp := B.NewRecord(); GetSym;
 		IF sym = S.lparen THEN
@@ -936,7 +936,8 @@ BEGIN
 	IF sym = S.const THEN GetSym;
 		WHILE sym = S.ident DO
 			ident := NewIdent(S.id); GetSym; Check0(S.eql);
-			x := ConstExpression(); IF ident # NIL THEN ident.obj := x END;
+			x := ConstExpression();
+			IF ident # NIL THEN ident.obj := x; x.ident := ident END;
 			Check0(S.semicolon)
 		END
 	END;
@@ -944,12 +945,13 @@ BEGIN
 		WHILE sym = S.ident DO
 			ident := NewIdent(S.id);
 			NEW(x); x.class := B.cType; GetSym; Check0(S.eql);
-			IF sym # S.pointer THEN x.type := type()
+			IF sym # S.pointer THEN x.type := type();
+				IF ident # NIL THEN ident.obj := x; x.ident := ident END
 			ELSE
-				IF ident # NIL THEN ident.obj := x END;
+				IF ident # NIL THEN ident.obj := x; x.ident := ident END;
 				x.type := PointerType(x)
 			END;
-			Check0(S.semicolon);
+			Check0(S.semicolon); IF x.type.obj = NIL THEN x.type.obj := x END;
 			IF (B.curLev = 0) & (ident # NIL) & (x.type.form = B.tRec) THEN
 				undef := undefList; prev := NIL;
 				WHILE (undef # NIL) & (undef.name # ident.name) DO
@@ -975,7 +977,8 @@ BEGIN
 			END;
 			Check0(S.colon); tp := type(); ident := first;
 			WHILE ident # NIL DO
-				ident.obj := B.NewVar(tp); ident := ident.next
+				x := B.NewVar(tp); ident.obj := x; x.ident := ident;
+				ident := ident.next
 			END;
 		END
 	END;
@@ -992,7 +995,9 @@ BEGIN
 		END;
 		ident := curProcIdent; DeclarationSequence();
 		curProcIdent := ident; proc.decl := B.topScope.first;
-		IF curProcIdent # NIL THEN curProcIdent.obj := proc END;		
+		IF curProcIdent # NIL THEN
+			curProcIdent.obj := proc; proc.ident := curProcIdent
+		END;		
 		IF sym = S.begin THEN GetSym; proc.statseq := StatementSequence() END;
 		IF sym = S.return THEN
 			IF tp.base = NIL THEN Mark('not function proc') END;

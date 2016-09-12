@@ -22,12 +22,12 @@
 MODULE Scanner1; (* Modified from ORS module in Project Oberon *)
 
 IMPORT
-	SYSTEM, Console, Base := Base1;
+	SYSTEM, BaseSys, Console;
   
 CONST
-	MaxIdLen = Base.MaxIdLen;
+	MaxIdLen* = 63; MaxStrLen* = 255;
 	MaxInt = 9223372036854775807; MinInt = -MaxInt - 1;
-    NKW = 37;  (* Number of keywords *)
+    NKW = 34;  (* Number of keywords *)
     maxExp = 38; stringBufSize = 256;
   
     (* Symbols *)
@@ -42,35 +42,34 @@ CONST
     comma* = 40; colon* = 41; becomes* = 42; upto* = 43; rparen* = 44;
     rbrak* = 45; rbrace* = 46; then* = 47; of* = 48; do* = 49;
     to* = 50; by* = 51; semicolon* = 52; end* = 53; bar* = 54;
-    else* = 55; elsif* = 56; until* = 57;
-    array* = 60; record* = 61; union* = 62; pointer* = 63; address* = 64;
+    else* = 55; elsif* = 56; until* = 57; return* = 58;
+    array* = 60; record* = 61; pointer* = 62;
 	const* = 70; type* = 71; var* = 72; procedure* = 73; begin* = 74; 
-	return* = 75; import* = 76; module* = 77;
-	extensible* = 80; definition* = 81;
+	import* = 76; module* = 77;
 	
 	call* = 100; par* = 101; sproc* = 102; designator* = 103;
+	
+TYPE
+	IdStr* = ARRAY MaxIdLen+1 OF CHAR;
+	Str* = ARRAY MaxStrLen+1 OF CHAR;
 
 VAR
 	ival*, slen*: INTEGER;
     rval*: REAL;
-    id*: Base.IdStr;
-    str*: Base.String; ansiStr*: BOOLEAN;
+    id*: IdStr;
+    str*: Str; ansiStr*: BOOLEAN;
     errcnt*: INTEGER;
 
-    ch: CHAR; eof, isDefinitionModule: BOOLEAN;
+    ch: CHAR; eof: BOOLEAN;
     errpos: INTEGER;
-    srcfile: Base.FileHandle;
+    srcfile: BaseSys.File;
     k: INTEGER;
     KWX: ARRAY 11 OF INTEGER;
-    keyTab: ARRAY NKW OF RECORD sym: INTEGER; id: Base.IdStr END;
+    keyTab: ARRAY NKW OF RECORD sym: INTEGER; id: IdStr END;
 	
-	buffer: ARRAY 100000H OF CHAR8;
+	buffer: ARRAY 100000H OF BYTE;
 	bufPos, filePos, bufSize: INTEGER;
 	
-PROCEDURE EnableDefinitionModuleMode*;
-BEGIN isDefinitionModule := TRUE
-END EnableDefinitionModuleMode;
-  
 PROCEDURE Pos*() : INTEGER;
 	RETURN filePos
 END Pos;
@@ -88,40 +87,36 @@ BEGIN
 END Mark;
 
 PROCEDURE Read;
-	VAR n : INTEGER;
+	VAR n: INTEGER;
 BEGIN
-	IF bufPos < bufSize THEN ch := buffer[bufPos]; INC (bufPos); INC (filePos)
+	IF bufPos < bufSize THEN
+		ch := CHR(buffer[bufPos]); INC(bufPos); INC(filePos)
 	ELSE eof := TRUE; ch := 0X
-	END	
+	END
 END Read;
 
-PROCEDURE Identifier (VAR sym: INTEGER);
+PROCEDURE Identifier(VAR sym: INTEGER);
 	VAR i, k2: INTEGER;
 BEGIN
 	i := 0;
 	REPEAT
-		IF i < Base.MaxIdLen THEN id[i] := ch; INC(i) END; Read
+		IF i < MaxIdLen THEN id[i] := ch; INC(i) END; Read
 	UNTIL (ch < '0') OR (ch > '9') & (ch < 'A')
 		OR (ch # '_') & (ch > 'Z') & (ch < 'a') OR (ch > 'z');
 	id[i] := 0X; 
 	IF i < 11 THEN k2 := KWX[i-1];  (* search for keyword *)
 		WHILE (id # keyTab[k2].id) & (k2 < KWX[i]) DO INC(k2) END;
-		IF k2 < KWX[i] THEN sym := keyTab[k2].sym;
-			IF (sym = union) & ~isDefinitionModule THEN
-				Mark ('UNION is only allowed in definition module')
-			END
-		ELSE sym := ident
-		END
+		IF k2 < KWX[i] THEN sym := keyTab[k2].sym ELSE sym := ident END
 	ELSE sym := ident
 	END
 END Identifier;
 
-PROCEDURE String (quoteCh: CHAR);
+PROCEDURE String(quoteCh: CHAR);
 	VAR i: INTEGER;
 BEGIN
 	i := 0; Read;
 	WHILE ~eof & (ch # quoteCh) DO
-		IF i < Base.MaxStrLen THEN str[i] := ch; INC(i)
+		IF i < MaxStrLen THEN str[i] := ch; INC(i)
 		ELSE Mark('String too long')
 		END;
 		Read
@@ -146,7 +141,7 @@ BEGIN
 		ELSIF ('A' <= ch) & (ch <= 'F') THEN n := ORD(ch) - 37H
 		ELSE n := 0; Mark('Hex digit expected')
 		END;
-		IF i < Base.MaxStrLen THEN str[i] := CHR(m*10H + n); INC(i)
+		IF i < MaxStrLen THEN str[i] := CHR(m*10H + n); INC(i)
 		ELSE Mark('String too long')
 		END;
 		Read
@@ -338,15 +333,15 @@ BEGIN (*Console.WriteInt (Pos()); Console.Write (' ');*)
 	UNTIL (sym # null) OR eof
 END Get;
 
-PROCEDURE Init* (VAR file: Base.FileHandle; pos: INTEGER);
+PROCEDURE Init*(VAR file: BaseSys.File; pos: INTEGER);
 BEGIN
-	isDefinitionModule := FALSE; errpos := pos; errcnt := 0;
-	srcfile := file; Base.Seek (file, pos); filePos := pos; bufPos := 0;
-	Base.Read_bytes (file, buffer, bufSize); Read
+	errpos := pos; errcnt := 0;
+	srcfile := file; BaseSys.Seek(file, pos); filePos := pos; bufPos := 0;
+	BaseSys.ReadBytes(file, buffer, bufSize); Read
 END Init;
 
-PROCEDURE EnterKW (sym: INTEGER; name: ARRAY OF CHAR);
-BEGIN Base.StrCopy(name, keyTab[k].id); keyTab[k].sym := sym; INC(k)
+PROCEDURE EnterKW(sym: INTEGER; name: IdStr);
+BEGIN keyTab[k].id := name; keyTab[k].sym := sym; INC(k)
 END EnterKW;
 
 BEGIN
@@ -380,7 +375,6 @@ BEGIN
 	EnterKW(const, 'CONST');
 	EnterKW(until, 'UNTIL');
 	EnterKW(while, 'WHILE');
-	EnterKW(union, 'UNION');
 	KWX[5] := k;
 	EnterKW(record, 'RECORD');
 	EnterKW(repeat, 'REPEAT');
@@ -393,7 +387,5 @@ BEGIN
 	KWX[8] := k;
 	EnterKW(procedure, 'PROCEDURE');
 	KWX[9] := k;
-	EnterKW(extensible, 'EXTENSIBLE');
-	EnterKW(definition, 'DEFINITION');
 	KWX[10] := k
 END Scanner1.
