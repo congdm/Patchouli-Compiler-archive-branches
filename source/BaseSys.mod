@@ -66,10 +66,10 @@ END ReadBytes;
 (* -------------------------------------------------------------------------- *)
 (* Write *)
 	
-PROCEDURE Write1*(VAR file: File; VAR n: INTEGER);
+PROCEDURE Write1*(VAR file: File; n: INTEGER);
 END Write1;
 	
-PROCEDURE Write2*(VAR file: File; VAR n: INTEGER);
+PROCEDURE Write2*(VAR file: File; n: INTEGER);
 END Write2;
 
 PROCEDURE WriteStr*(VAR file: File; VAR str: ARRAY OF CHAR);
@@ -84,16 +84,16 @@ BEGIN i := -1; n := 0;
 	REPEAT INC(i); Write1(file, n); str[i] := CHR(n) UNTIL n = 0
 END WriteAnsiStr;
 	
-PROCEDURE Write4*(VAR file: File; VAR n: INTEGER);
+PROCEDURE Write4*(VAR file: File; n: INTEGER);
 BEGIN
 END Write4;
 	
-PROCEDURE Write8*(VAR file: File; VAR n: INTEGER);
+PROCEDURE Write8*(VAR file: File; n: INTEGER);
 BEGIN
 END Write8;
 
 PROCEDURE WriteBytes*(
-	VAR file: File; VAR buf: ARRAY OF SYSTEM.BYTE; VAR byteWritten: INTEGER
+	VAR file: File; buf: ARRAY OF SYSTEM.BYTE; VAR byteWritten: INTEGER
 );
 BEGIN
 END WriteBytes;

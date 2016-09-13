@@ -83,7 +83,7 @@ PROCEDURE IsConst(x: B.Object): BOOLEAN;
 END IsConst;
 
 PROCEDURE IsOpenArray(tp: B.Type): BOOLEAN;
-	RETURN (tp.form = B.tArray) & (tp.len = 0)
+	RETURN (tp.form = B.tArray) & (tp.len < 0)
 END IsOpenArray;
 
 PROCEDURE SamePars(p1, p2: B.Ident): BOOLEAN;
@@ -200,7 +200,7 @@ END CheckVar;
 PROCEDURE NewIdent(name: B.IdStr): B.Ident;
 	VAR ident, p: B.Ident;
 BEGIN
-	NEW(ident); ident.name := name; ident.next := NIL;
+	NEW(ident); ident.name := name; ident.next := NIL; ident.export := FALSE;
 	IF B.topScope.first = NIL THEN B.topScope.first := ident
 	ELSE p := B.topScope.first;
 		WHILE (p.next # NIL) & (p.name # name) DO p := p.next END;
@@ -751,6 +751,17 @@ END StatementSequence;
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
+PROCEDURE CheckExport(ident: B.Ident);
+BEGIN
+	IF sym = S.times THEN
+		IF B.curLev = 0 THEN
+			IF ident # NIL THEN ident.export := TRUE END
+		ELSE Mark('remove *')
+		END;
+		GetSym
+	END
+END CheckExport;
+
 PROCEDURE FormalType(): B.Type;
 	VAR x: B.Object; tp: B.Type;
 BEGIN tp := B.intType;
@@ -759,7 +770,7 @@ BEGIN tp := B.intType;
 		ELSE Mark('not type')
 		END
 	ELSIF sym = S.array THEN
-		tp := B.NewArray(0); GetSym; Check0(S.of);
+		tp := B.NewArray(-1); GetSym; Check0(S.of);
 		IF sym = S.array THEN Mark('Multi-dim open array not supported') END;
 		tp.base := FormalType()
 	END;
@@ -840,10 +851,10 @@ END PointerType;
 PROCEDURE FieldList(rec: B.Type);
 	VAR first, field: B.Ident; ft: B.Type;
 BEGIN
-	first := NewIdent(S.id); GetSym;
+	first := NewIdent(S.id); GetSym; CheckExport(first);
 	WHILE sym = S.comma DO GetSym;
 		IF sym = S.ident THEN
-			field := NewIdent(S.id); GetSym;
+			field := NewIdent(S.id); GetSym; CheckExport(field);
 			IF first = NIL THEN first := field END
 		ELSIF sym < S.ident THEN Missing(S.ident)
 		ELSE Mark('remove ,')
@@ -935,23 +946,24 @@ PROCEDURE DeclarationSequence;
 BEGIN
 	IF sym = S.const THEN GetSym;
 		WHILE sym = S.ident DO
-			ident := NewIdent(S.id); GetSym; Check0(S.eql);
-			x := ConstExpression();
+			ident := NewIdent(S.id); GetSym; CheckExport(ident);
+			Check0(S.eql); x := ConstExpression();
 			IF ident # NIL THEN ident.obj := x; x.ident := ident END;
 			Check0(S.semicolon)
 		END
 	END;
 	IF sym = S.type THEN GetSym; undefList := NIL;
 		WHILE sym = S.ident DO
-			ident := NewIdent(S.id);
-			NEW(x); x.class := B.cType; GetSym; Check0(S.eql);
-			IF sym # S.pointer THEN x.type := type();
+			ident := NewIdent(S.id); GetSym; CheckExport(ident); Check0(S.eql);
+			IF sym # S.pointer THEN
+				tp := type(); x := B.NewTypeObj(tp);
 				IF ident # NIL THEN ident.obj := x; x.ident := ident END
 			ELSE
+				x := B.NewTypeObj(B.intType);
 				IF ident # NIL THEN ident.obj := x; x.ident := ident END;
-				x.type := PointerType(x)
+				tp := PointerType(x); IF tp.obj = NIL THEN tp.obj := x END
 			END;
-			Check0(S.semicolon); IF x.type.obj = NIL THEN x.type.obj := x END;
+			Check0(S.semicolon);
 			IF (B.curLev = 0) & (ident # NIL) & (x.type.form = B.tRec) THEN
 				undef := undefList; prev := NIL;
 				WHILE (undef # NIL) & (undef.name # ident.name) DO
@@ -968,12 +980,13 @@ BEGIN
 	END;
 	IF sym = S.var THEN GetSym;
 		WHILE sym = S.ident DO
-			first := NewIdent(S.id); GetSym;
+			first := NewIdent(S.id); GetSym; CheckExport(first);
 			WHILE sym = S.comma DO GetSym;
-				IF sym = S.ident THEN ident := NewIdent(S.id)
+				IF sym = S.ident THEN
+					ident := NewIdent(S.id); GetSym; CheckExport(ident);
+					IF first = NIL THEN first := ident END
 				ELSE Missing(S.ident); ident := NIL
-				END;
-				IF first = NIL THEN first := ident END; GetSym
+				END
 			END;
 			Check0(S.colon); tp := type(); ident := first;
 			WHILE ident # NIL DO
@@ -983,7 +996,8 @@ BEGIN
 		END
 	END;
 	WHILE sym = S.procedure DO GetSym;
-		IF sym = S.ident THEN curProcIdent := NewIdent(S.id); GetSym
+		IF sym = S.ident THEN curProcIdent := NewIdent(S.id);
+			GetSym; CheckExport(curProcIdent)
 		ELSE curProcIdent := NIL; Mark('proc name?')
 		END;
 		proc := B.NewProc(); tp := B.NewProcType(); proc.type := tp;
@@ -1017,20 +1031,49 @@ BEGIN
 	END
 END DeclarationSequence;
 
+PROCEDURE import;
+	VAR ident: B.Ident; modname: B.IdStr;
+BEGIN ident := NewIdent(S.id); modname := S.id; GetSym;
+	IF sym = S.becomes THEN GetSym;
+		IF sym = S.ident THEN modname := S.id; GetSym
+		ELSE Missing(S.ident)
+		END
+	END;
+	B.NewModule(ident, modname)
+END import;
+
+PROCEDURE ImportList;
+BEGIN GetSym;
+	IF sym = S.ident THEN import ELSE Missing(S.ident) END;
+	WHILE sym = S.comma DO GetSym;
+		IF sym = S.ident THEN import ELSE Missing(S.ident) END
+	END;
+	Check0(S.semicolon);
+	IF S.errcnt = 0 THEN B.ImportModules END
+END ImportList;
+
 PROCEDURE Module*;
 	VAR modid: B.IdStr; modinit: B.Node;
 BEGIN
-	B.Init; GetSym; modid[0] := 0X;
+	GetSym; modid := '_dummy';
 	IF sym = S.ident THEN modid := S.id; GetSym ELSE Missing(S.ident) END;
-	Check0(S.semicolon); DeclarationSequence;
-	IF sym = S.begin THEN GetSym; modinit := StatementSequence() END;
-	Check0(S.end);
-	IF sym = S.ident THEN
-		IF S.id # modid THEN Mark('wrong module name') END; GetSym
-	ELSE Missing(S.ident)
+	Check0(S.semicolon); B.Init(modid);
+	IF sym = S.import THEN ImportList END;
+	
+	IF S.errcnt = 0 THEN
+		DeclarationSequence;
+		IF sym = S.begin THEN GetSym; modinit := StatementSequence() END;
+		Check0(S.end);
+		IF sym = S.ident THEN
+			IF S.id # modid THEN Mark('wrong module name') END; GetSym
+		ELSE Missing(S.ident)
+		END;
+		Check0(S.period);
 	END;
-	Check0(S.period);
-	IF S.errcnt = 0 THEN G.Generate(modid, modinit) END
+	
+	IF S.errcnt = 0 THEN
+		B.WriteSymfile
+	END
 END Module;
 	
 BEGIN
