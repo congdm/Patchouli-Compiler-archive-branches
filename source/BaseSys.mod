@@ -10,6 +10,8 @@ CONST
 TYPE
 	Pointer = INTEGER;
 	Handle = INTEGER;
+	Int = INTEGER;
+	Uint = INTEGER;
 	Dword = INTEGER;
 	Word = INTEGER;
 	Bool = INTEGER;
@@ -49,6 +51,16 @@ VAR
 	): Bool;
 	GetTickCount_: PROCEDURE(): Dword;
 	GetCommandLineW: PROCEDURE(): Pointer;
+	WideCharToMultiByte: PROCEDURE(
+		CodePage: Uint;
+		dwFlags: Dword;
+		lpWideCharStr: Pointer;
+		cchWideChar: Int;
+		lpMultiByteStr: Pointer;
+		cbMultiByte: Int;
+		lpDefaultChar, lpUsedDefaultChar: Pointer
+	): Int;
+	GetStdHandle: PROCEDURE(nStdHandle: Dword): Handle;
 	
 PROCEDURE ImportProc(
 	VAR proc: ARRAY OF SYSTEM.BYTE;
@@ -73,6 +85,10 @@ END AsDword;
 PROCEDURE AsWord(x: INTEGER): INTEGER;
 	RETURN x MOD 10000H
 END AsWord;
+
+PROCEDURE AsInt(x: INTEGER): INTEGER;
+	RETURN ASR(LSL(x, 32), 32)
+END AsInt;
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -274,6 +290,55 @@ END SeekRel;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
+(* Console *)
+
+PROCEDURE Console_Write*(ch: CHAR);
+	CONST CP_UTF8 = 65001; STD_OUTPUT_HANDLE = -11;
+	VAR buf: ARRAY 8 OF BYTE;
+		size: Int; bRes: Bool; dwByteWritten: Dword;
+BEGIN
+	size := WideCharToMultiByte(
+		CP_UTF8, 0, SYSTEM.ADR(ch), 1, SYSTEM.ADR(buf), 0, 0, 0
+	);
+	IF size <= LEN(buf) THEN
+		size := WideCharToMultiByte(
+			CP_UTF8, 0, SYSTEM.ADR(ch), 1, SYSTEM.ADR(buf), size, 0, 0
+		);
+		bRes := WriteFile(
+			GetStdHandle(STD_OUTPUT_HANDLE), SYSTEM.ADR(buf), size,
+			SYSTEM.ADR(dwByteWritten), 0
+		)
+	END
+END Console_Write;
+
+PROCEDURE Console_WriteStr*(str: ARRAY OF CHAR);
+	CONST CP_UTF8 = 65001; STD_OUTPUT_HANDLE = -11;
+	VAR buf: ARRAY 256 OF BYTE; strlen: INTEGER;
+		size: Int; bRes: Bool; dwByteWritten: Dword;
+BEGIN
+	strlen := 0; WHILE str[strlen] # 0X DO INC(strlen) END;
+	size := WideCharToMultiByte(
+		CP_UTF8, 0, SYSTEM.ADR(str), strlen, SYSTEM.ADR(buf), 0, 0, 0
+	);
+	IF size <= LEN(buf) THEN
+		size := WideCharToMultiByte(
+			CP_UTF8, 0, SYSTEM.ADR(str), strlen, SYSTEM.ADR(buf), size, 0, 0
+		);
+		bRes := WriteFile(
+			GetStdHandle(STD_OUTPUT_HANDLE), SYSTEM.ADR(buf), size,
+			SYSTEM.ADR(dwByteWritten), 0
+		)
+	END
+END Console_WriteStr;
+
+PROCEDURE Console_WriteLn*;
+END Console_WriteLn;
+
+PROCEDURE Console_WriteInt*(n: INTEGER);
+END Console_WriteInt;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
 
 PROCEDURE GetTickCount*(): INTEGER;
 	RETURN GetTickCount_()
@@ -301,6 +366,10 @@ BEGIN buf := GetCommandLineW(); i := 0;
 	IF k < LEN(out) THEN out[k] := 0X END
 END GetArg;
 
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE Init;
 BEGIN
 	ImportProc(GetFileAttributesW, Kernel32, 'GetFileAttributesW');
 	ImportProc(CreateFileW, Kernel32, 'CreateFileW');
@@ -312,4 +381,9 @@ BEGIN
 	ImportProc(SetFilePointerEx, Kernel32, 'SetFilePointerEx');
 	ImportProc(GetTickCount_, Kernel32, 'GetTickCount');
 	ImportProc(GetCommandLineW, Kernel32, 'GetCommandLineW');
+	
+	
+END Init;
+
+BEGIN Init
 END BaseSys.
