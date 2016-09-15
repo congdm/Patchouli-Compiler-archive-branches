@@ -165,7 +165,8 @@ BEGIN
 	NEW(x); x.class := cVar; x.type := strType; x.lev := curLev;
 	x.par := FALSE; x.ronly := TRUE; x.len := slen;
 	IF str[0] # 0X (* need alloc buffer *) THEN 
-		IF strbufSize + slen >= LEN(strbuf) THEN S.Mark('too many strings')
+		IF strbufSize + slen >= LEN(strbuf) THEN
+			S.Mark('too many strings'); x.bufpos := -1
 		ELSE x.bufpos := strbufSize; strbufSize := strbufSize + slen;
 			FOR i := 0 TO slen-1 DO strbuf[x.bufpos+i] := str[i] END
 		END
