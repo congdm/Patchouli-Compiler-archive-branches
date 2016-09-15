@@ -79,7 +79,7 @@ PROCEDURE IsVarPar(x: B.Object): BOOLEAN;
 END IsVarPar;
 
 PROCEDURE IsConst(x: B.Object): BOOLEAN;
-	RETURN (x IS B.Const) OR (x IS B.Str)
+	RETURN (x IS B.Const) OR (x IS B.Str) & (x(B.Str).bufpos >= 0)
 END IsConst;
 
 PROCEDURE IsOpenArray(tp: B.Type): BOOLEAN;
