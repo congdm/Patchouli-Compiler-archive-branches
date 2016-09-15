@@ -2,25 +2,28 @@ MODULE AyaCompile1;
 (*$CONSOLE*)
 
 IMPORT
-	Console, Base := Base1, Scanner := Scanner1, Parser := Parser1;
+	Sys := BaseSys, Scanner := Scanner1, Parser := Parser1;
 	
 VAR
-	srcfile: Base.FileHandle;
+	srcfile: Sys.File;
 	str: ARRAY 256 OF CHAR;
 	len, sym: INTEGER;
 	
 BEGIN
-	Base.GetArg (str, len, 1);
-	IF str[0] # 0X THEN Base.Open (srcfile, str);
-		Scanner.Init (srcfile, 0); Scanner.Get (sym);
-		IF sym = Scanner.module THEN Parser.Module
-		ELSE Scanner.Mark ('Not a MODULE or LIBRARY')
-		END;
-		Base.Close (srcfile)
+	Sys.GetArg (str, len, 1);
+	IF str[0] # 0X THEN
+		IF Sys.Existed(str) THEN
+			Sys.Open(srcfile, str); Scanner.Init(srcfile, 0);
+			Sys.Close(srcfile); Scanner.Get(sym); 
+			IF sym = Scanner.module THEN Parser.Module
+			ELSE Scanner.Mark('MODULE?')
+			END
+		ELSE Sys.Console_WriteStr('File not found')
+		END
 	ELSE
-		Console.WriteString ('AyaCompiler v0.7a for Oberon-07 language');
-		Console.WriteLn; 
- 		Console.WriteString ('Usage: AyaCompile <inputfile>');
-		Console.WriteLn
+		Sys.Console_WriteStr('AyaCompiler v0.8-alpha for Oberon-07 language');
+		Sys.Console_WriteLn;
+ 		Sys.Console_WriteStr('Usage: AyaCompile <inputfile>');
+		Sys.Console_WriteLn
 	END
 END AyaCompile1.

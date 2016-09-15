@@ -22,7 +22,7 @@
 MODULE Scanner1; (* Modified from ORS module in Project Oberon *)
 
 IMPORT
-	SYSTEM, BaseSys, Console;
+	SYSTEM, BaseSys;
   
 CONST
 	MaxIdLen* = 63; MaxStrLen* = 255;
@@ -74,14 +74,14 @@ PROCEDURE Pos*() : INTEGER;
 	RETURN filePos
 END Pos;
 
-PROCEDURE Mark* (msg: ARRAY OF CHAR);
+PROCEDURE Mark*(msg: ARRAY OF CHAR);
 	VAR p: INTEGER;
 BEGIN
 	p := Pos();
 	IF (p > errpos) & (errcnt < 25) THEN
-		Console.WriteString ('file pos '); Console.WriteInt (p);
-		Console.WriteString (': '); Console.WriteString (msg); Console.WriteLn;
-		INC (errcnt);
+		BaseSys.Console_WriteStr('file pos '); BaseSys.Console_WriteInt(p);
+		BaseSys.Console_WriteStr(': '); BaseSys.Console_WriteStr(msg);
+		BaseSys.Console_WriteLn; INC(errcnt);
 	END;
 	errpos := p + 4
 END Mark;
@@ -90,7 +90,7 @@ PROCEDURE Read;
 	VAR n: INTEGER;
 BEGIN
 	IF bufPos < bufSize THEN
-		ch := CHR(buffer[bufPos]); INC(bufPos); INC(filePos)
+		ch := CHR(buffer[bufPos] MOD 256); INC(bufPos); INC(filePos)
 	ELSE eof := TRUE; ch := 0X
 	END
 END Read;

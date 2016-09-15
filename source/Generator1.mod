@@ -1,7 +1,7 @@
 MODULE Generator1;
 
 IMPORT
-	SYS := SYSTEM, B := Base1, S := Scanner1, Con := Console;
+	SYS := SYSTEM, B := Base1, S := Scanner1;
 	
 VAR
 	indentLev: INTEGER;

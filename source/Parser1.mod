@@ -79,7 +79,9 @@ PROCEDURE IsVarPar(x: B.Object): BOOLEAN;
 END IsVarPar;
 
 PROCEDURE IsConst(x: B.Object): BOOLEAN;
-	RETURN (x IS B.Const) OR (x IS B.Str)
+	RETURN (x IS B.Const)
+	OR (x IS B.Str) & (x(B.Str).lev >= 0)
+	OR (x IS B.Node) & x(B.Node).const
 END IsConst;
 
 PROCEDURE IsOpenArray(tp: B.Type): BOOLEAN;
@@ -226,6 +228,11 @@ BEGIN
 	IF x IS B.Var THEN designator.ronly := x(B.Var).ronly END;
 	RETURN designator
 END NewDesignator;
+
+PROCEDURE MarkConst(x: B.Node);
+BEGIN
+	x.const := IsConst(x.left) & IsConst(x.right)
+END MarkConst;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -430,13 +437,14 @@ END element;
 
 PROCEDURE set(): B.Object;
 	VAR x, t, u: B.Node;
-BEGIN x := NewNode(S.lbrace, NIL, NIL); GetSym;
+BEGIN x := NewNode(S.lbrace, NIL, NIL); x.const := TRUE; GetSym;
 	IF sym # S.rbrace THEN
 		x.left := element(); t := x;
+		x.const := x.const & IsConst(x.left);
 		WHILE sym = S.comma DO
 			IF sym # S.rbrace THEN
 				u := NewNode(S.comma, element(), NIL);
-				t.right := u; t := u
+				t.right := u; t := u; x.const := x.const & IsConst(u.left)
 			ELSE Mark('remove ,')
 			END
 		END

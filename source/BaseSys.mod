@@ -99,7 +99,7 @@ PROCEDURE Existed*(filename: ARRAY OF CHAR): BOOLEAN;
 	VAR dwRes: Dword;
 BEGIN
 	dwRes := GetFileAttributesW(SYSTEM.ADR(filename));
-	RETURN dwRes = ORD(INVALID_FILE_ATTRIBUTES)
+	RETURN dwRes # ORD(INVALID_FILE_ATTRIBUTES)
 END Existed;
 	
 PROCEDURE Open*(VAR file: File; filename: ARRAY OF CHAR);
@@ -332,9 +332,38 @@ BEGIN
 END Console_WriteStr;
 
 PROCEDURE Console_WriteLn*;
+	CONST STD_OUTPUT_HANDLE = -11;
+	VAR buf: ARRAY 2 OF BYTE; bRes: Bool;
+		dwByteWritten: Dword;
+BEGIN buf[0] := 13; buf[1] := 10;
+	bRes := WriteFile(
+		GetStdHandle(STD_OUTPUT_HANDLE), SYSTEM.ADR(buf), 2,
+		SYSTEM.ADR(dwByteWritten), 0
+	)
 END Console_WriteLn;
 
-PROCEDURE Console_WriteInt*(n: INTEGER);
+PROCEDURE Console_WriteInt*(x: INTEGER);
+	CONST MinInt = -9223372036854775807-1;
+	VAR neg: BOOLEAN; s, str: ARRAY 32 OF CHAR; i, j: INTEGER;
+BEGIN
+	IF x # MinInt THEN i := 0; j := 0;
+		IF x < 0 THEN neg := TRUE; x := -x ELSE neg := FALSE END;
+		REPEAT s[i] := CHR(x MOD 10 + ORD('0')); INC(i); x := x DIV 10
+		UNTIL x = 0;		
+		IF ~neg THEN
+			WHILE (j < i) & (j < LEN(str)) DO
+				str[j] := s[i-1-j]; INC(j)
+			END;
+			str[j] := 0X
+		ELSE str[0] := '-';
+			WHILE (j < i) & (j < LEN(str)-1) DO
+				str[j+1] := s[i-1-j]; INC(j)
+			END;
+			str[j+1] := 0X
+		END
+	ELSE str := '-9223372036854775808'
+	END;
+	Console_WriteStr(str)
 END Console_WriteInt;
 
 (* -------------------------------------------------------------------------- *)
@@ -381,8 +410,8 @@ BEGIN
 	ImportProc(SetFilePointerEx, Kernel32, 'SetFilePointerEx');
 	ImportProc(GetTickCount_, Kernel32, 'GetTickCount');
 	ImportProc(GetCommandLineW, Kernel32, 'GetCommandLineW');
-	
-	
+	ImportProc(WideCharToMultiByte, Kernel32, 'WideCharToMultiByte');
+	ImportProc(GetStdHandle, Kernel32, 'GetStdHandle')
 END Init;
 
 BEGIN Init
