@@ -64,7 +64,7 @@ TYPE
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
 	
 	NodeDesc* = EXTENSIBLE RECORD (ObjDesc)
-		op*: INTEGER; left*, right*: Object; ronly*, const*: BOOLEAN
+		op*: INTEGER; left*, right*: Object; ronly*: BOOLEAN
 	END;
 	
 	TypeDesc* = RECORD
@@ -80,7 +80,7 @@ VAR
 	boolType*, setType*, charType*, nilType*, strType*: Type;
 	noType*: Type; predefinedTypes: ARRAY 32 OF Type;
 	
-	topScope*, universe*: Scope;
+	topScope*, universe*, systemScope: Scope;
 	curLev*, modlev*: INTEGER; modid*: IdStr; modkey*: ModuleKey;
 	
 	symfile: Sys.File;
@@ -575,7 +575,13 @@ PROCEDURE NewModule*(modident: Ident; modname: IdStr);
 		depmod, module: Module; cls: INTEGER;
 BEGIN
 	path[0] := 0X; AppendStr(modname, path); AppendStr('.sym', path);
-	IF Sys.Existed(path) THEN
+	IF modname = 'SYSTEM' THEN
+		NEW(module); module.export := FALSE; module.name := modname;
+		module.lev := -1; module.first := systemScope.first;
+		IF modident # NIL THEN
+			modident.obj := module; module.ident := modident
+		END
+	ELSIF Sys.Existed(path) THEN
 		NEW(module); module.export := FALSE; module.name := modname;
 		module.path := path; module.lev := 0;
 		IF modident # NIL THEN
@@ -644,7 +650,22 @@ BEGIN
 	Enter(NewSProc('FLOOR', cSFunc), 'FLOOR');
 	Enter(NewSProc('FLT', cSFunc), 'FLT');
 	Enter(NewSProc('ORD', cSFunc), 'ORD');
-	Enter(NewSProc('CHR', cSFunc), 'CHR')
+	Enter(NewSProc('CHR', cSFunc), 'CHR');
+	
+	OpenScope;
+	Enter(NewSProc('GET', cSProc), 'GET');
+	Enter(NewSProc('PUT', cSProc), 'PUT');
+	Enter(NewSProc('COPY', cSProc), 'COPY');
+	Enter(NewSProc('LoadLibraryW', cSProc), 'LoadLibraryW');
+	Enter(NewSProc('GetProcAddress', cSProc), 'GetProcAddress');
+	
+	Enter(NewSProc('ADR', cSFunc), 'ADR');
+	Enter(NewSProc('SIZE', cSFunc), 'SIZE');
+	Enter(NewSProc('BIT', cSFunc), 'BIT');
+	Enter(NewSProc('VAL', cSFunc), 'VAL');
+	
+	Enter(NewTypeObj(byteType), 'BYTE');
+	systemScope := topScope; CloseScope
 END Init;
 
 BEGIN

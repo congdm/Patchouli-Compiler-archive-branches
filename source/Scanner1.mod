@@ -68,7 +68,7 @@ VAR
     keyTab: ARRAY NKW OF RECORD sym: INTEGER; id: IdStr END;
 	
 	buffer: ARRAY 100000H OF BYTE;
-	bufPos, filePos, bufSize: INTEGER;
+	bufPos, lastPos, filePos, bufSize: INTEGER;
 	
 PROCEDURE Pos*() : INTEGER;
 	RETURN filePos
@@ -77,7 +77,7 @@ END Pos;
 PROCEDURE Mark*(msg: ARRAY OF CHAR);
 	VAR p: INTEGER;
 BEGIN
-	p := Pos();
+	(*p := Pos();*) p := lastPos;
 	IF (p > errpos) & (errcnt < 25) THEN
 		BaseSys.Console_WriteStr('file pos '); BaseSys.Console_WriteInt(p);
 		BaseSys.Console_WriteStr(': '); BaseSys.Console_WriteStr(msg);
@@ -92,7 +92,10 @@ BEGIN
 	IF bufPos < bufSize THEN
 		ch := CHR(buffer[bufPos] MOD 256); INC(bufPos); INC(filePos)
 	ELSE eof := TRUE; ch := 0X
-	END
+	END;
+	(*IF ch = CHR(13) THEN BaseSys.Console_WriteLn; INC(bufPos); INC(filePos)
+	ELSE BaseSys.Console_Write(ch)
+	END*)
 END Read;
 
 PROCEDURE Identifier(VAR sym: INTEGER);
@@ -179,9 +182,12 @@ BEGIN
 			IF h >= 10 THEN h := h-7 END;
 			k2 := k2*10H + h; INC(i) (* no overflow check *)
 		UNTIL i = n;
-		IF ch = 'X' THEN sym := char;
-			IF k2 < 100H THEN ival := k2
+		IF ch = 'X' THEN sym := string;
+			IF k2 < 10000H THEN ival := k2
 			ELSE Mark('Illegal value'); ival := 0
+			END;
+			IF k2 = 0 THEN str[0] := 0X; slen := 1
+			ELSE str[0] := CHR(k2); str[1] := 0X; slen := 2
 			END
 		ELSIF ch = 'R' THEN sym := real; rval := SYSTEM.VAL(REAL, k2)
 		ELSE sym := int; ival := k2
@@ -274,9 +280,9 @@ BEGIN
 END SkipComment;
 
 PROCEDURE Get*(VAR sym: INTEGER);
-BEGIN (*Console.WriteInt (Pos()); Console.Write (' ');*)
+BEGIN
     REPEAT
-		WHILE ~eof & (ch <= ' ') DO Read END;
+		WHILE ~eof & (ch <= ' ') DO Read END; lastPos := filePos-1;
 		IF ch < 'A' THEN
 			IF ch < '0' THEN
 				IF (ch = 22X) OR (ch = 27X) THEN String(ch); sym := string
@@ -284,7 +290,7 @@ BEGIN (*Console.WriteInt (Pos()); Console.Write (' ');*)
 				ELSIF ch = '$' THEN HexString; sym := string
 				ELSIF ch = '&' THEN Read; sym := and
 				ELSIF ch = '(' THEN Read; 
-					IF ch = '*' THEN sym := null; Read; SkipComment (0)
+					IF ch = '*' THEN sym := null; Read; SkipComment(0)
 					ELSE sym := lparen
 					END
 				ELSIF ch = ')' THEN Read; sym := rparen

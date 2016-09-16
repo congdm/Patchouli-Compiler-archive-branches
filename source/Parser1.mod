@@ -1,7 +1,7 @@
 MODULE Parser1;
 
 IMPORT
-	B := Base1, S := Scanner1, G := Generator1;
+	Sys := BaseSys, B := Base1, S := Scanner1, G := Generator1;
 	
 TYPE
 	UndefPtrList = POINTER TO RECORD
@@ -227,16 +227,11 @@ BEGIN
 	RETURN designator
 END NewDesignator;
 
-PROCEDURE MarkConst(x: B.Node);
-BEGIN
-	x.const := IsConst(x.left) & IsConst(x.right)
-END MarkConst;
-
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
 PROCEDURE Call(x: B.Object): B.Node;
-	VAR call, last: B.Node; proc: B.Proc; proctyp: B.Type;
+	VAR call, last: B.Node; proc: B.Type;
 		fpar: B.Ident; nact: INTEGER;
 		
 	PROCEDURE Parameter(VAR last: B.Node; fpar: B.Ident);
@@ -247,24 +242,23 @@ PROCEDURE Call(x: B.Object): B.Node;
 	END Parameter;
 		
 BEGIN (* Call *)
-	proc := x(B.Proc); proctyp := proc.type;
-	call := NewNode(S.call, proc, NIL); call.type := proctyp.base;
+	proc := x.type; call := NewNode(S.call, x, NIL); call.type := proc.base;
 	IF sym = S.lparen THEN GetSym;
-		IF sym # S.rparen THEN
-			fpar := proctyp.fields; Parameter(last, fpar); nact := 1;
+		IF sym # S.rparen THEN last := call;
+			fpar := proc.fields; Parameter(last, fpar); nact := 1;
 			WHILE sym = S.comma DO
 				IF fpar # NIL THEN fpar := fpar.next END; GetSym;
 				IF sym # S.rparen THEN Parameter(last, fpar); nact := nact + 1
 				ELSE Mark('remove ,')
 				END
 			END;
-			IF nact = proctyp.nfpar THEN (*valid*)
-			ELSIF nact > proctyp.nfpar THEN Mark('too many params')
+			IF nact = proc.nfpar THEN (*valid*)
+			ELSIF nact > proc.nfpar THEN Mark('too many params')
 			ELSE Mark('not enough params')
 			END;
 			Check0(S.rparen)
 		ELSIF sym = S.rparen THEN
-			IF proctyp.nfpar # 0 THEN Mark('need params') END; GetSym
+			IF proc.nfpar # 0 THEN Mark('need params') END; GetSym
 		END
 	END;
 	RETURN call
@@ -289,7 +283,7 @@ END FindIdent;
 
 PROCEDURE qualident(): B.Object;
 	VAR x: B.Object; ident: B.Ident;
-BEGIN x := FindIdent();
+BEGIN x := FindIdent(); GetSym;
 	IF (x IS B.Module) & (sym = S.period) THEN GetSym;
 		IF sym = S.ident THEN
 			ident := x(B.Module).first;
@@ -298,7 +292,7 @@ BEGIN x := FindIdent();
 			END;
 			IF ident = NIL THEN Mark('not found'); x := NIL
 			ELSE x := ident.obj
-			END
+			END; GetSym
 		ELSE Missing(S.ident); x := NIL
 		END
 	ELSIF x IS B.Module THEN x := NIL
@@ -394,8 +388,10 @@ BEGIN
 		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
 	ELSIF f.id = 'FLT' THEN y := expression0(); CheckInt(y);
 		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.realType
-	ELSIF f.id = 'ORD' THEN
-		y := expression0(); Check1(y, {B.tSet, B.tBool, B.tChar});
+	ELSIF f.id = 'ORD' THEN y := expression0();
+		IF (y.type # B.strType) OR (y(B.Str).len > 2) THEN
+			Check1(y, {B.tSet, B.tBool, B.tChar})
+		END;
 		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
 	ELSIF f.id = 'CHR' THEN y := expression0(); CheckInt(y);
 		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.charType
@@ -425,29 +421,40 @@ END StdFunc;
 PROCEDURE element(): B.Object;
 	VAR x, y: B.Object;
 BEGIN
-	x := expression0(); CheckInt(x);
+	x := expression0(); CheckInt(x); G.CheckSetElement(x);
 	IF sym = S.upto THEN
-		y := expression0(); CheckInt(y);
-		x := NewNode(S.upto, x, y)
+		GetSym; y := expression0(); CheckInt(y); G.CheckSetElement(y);
+		IF IsConst(x) & IsConst(y) THEN x := G.RangeSet(x, y)
+		ELSE x := NewNode(S.upto, x, y)
+		END;
+	ELSIF IsConst(x) THEN x := G.SingletonSet(x)
 	END;
 	RETURN x
 END element;
 
 PROCEDURE set(): B.Object;
-	VAR x, t, u: B.Node;
-BEGIN x := NewNode(S.lbrace, NIL, NIL); x.const := TRUE; GetSym;
-	IF sym # S.rbrace THEN
-		x.left := element(); t := x;
-		x.const := x.const & IsConst(x.left);
+	VAR const, x, y: B.Object; node, next: B.Node;
+BEGIN
+	const := B.NewConst(B.setType, 0); GetSym;
+	IF sym # S.rbrace THEN y := element();
+		IF IsConst(y) THEN const := G.FoldConst(S.plus, const, y)
+		ELSE node := NewNode(S.comma, y, NIL);
+			x := NewNode(S.lbrace, const, node)
+		END;
 		WHILE sym = S.comma DO
-			IF sym # S.rbrace THEN
-				u := NewNode(S.comma, element(), NIL);
-				t.right := u; t := u; x.const := x.const & IsConst(u.left)
+			IF sym # S.rbrace THEN y := element();
+				IF IsConst(y) THEN const := G.FoldConst(S.plus, const, y)
+				ELSE next := NewNode(S.comma, y, NIL);
+					IF x = NIL THEN x := NewNode(S.lbrace, const, next);
+					ELSE node.right := next
+					END;
+					node := next
+				END
 			ELSE Mark('remove ,')
 			END
 		END
 	END;
-	Check0(S.rbrace);
+	Check0(S.rbrace); IF x = NIL THEN x := const END;
 	RETURN x
 END set;
 
@@ -475,7 +482,9 @@ BEGIN
 		END
 	ELSIF sym = S.lparen THEN GetSym; x := expression0(); Check0(S.rparen)
 	ELSIF sym = S.not THEN GetSym; x := factor(); CheckBool(x);
-		x := NewNode(S.not, x, NIL); x.type := B.boolType
+		IF IsConst(x) THEN x := G.NegateConst(x)
+		ELSE x := NewNode(S.not, x, NIL); x.type := B.boolType
+		END
 	ELSE Mark('Invalid factor'); x := B.NewConst(B.intType, 0)
 	END;
 	RETURN x
@@ -486,18 +495,26 @@ PROCEDURE term(): B.Object;
 BEGIN x := factor();
 	WHILE sym = S.times DO
 		Check1(x, {B.tInt, B.tReal, B.tSet}); GetSym; y := factor();
-		IF ~CompTypes(xtype, y.type) THEN Mark('invalid type') END;
-		xtype := x.type; x := NewNode(S.times, x, y); x.type := xtype
+		IF ~CompTypes(x.type, y.type) THEN Mark('invalid type') END;
+		IF IsConst(x) & IsConst(y) THEN x := G.FoldConst(S.times, x, y)
+		ELSE xtype := x.type; x := NewNode(S.times, x, y); x.type := xtype
+		END
 	ELSIF sym = S.rdiv DO
 		Check1(x, {B.tReal, B.tSet}); GetSym; y := factor();
-		IF ~CompTypes(xtype, y.type) THEN Mark('invalid type') END;
-		xtype := x.type; x := NewNode(S.times, x, y); x.type := xtype
+		IF ~CompTypes(x.type, y.type) THEN Mark('invalid type') END;
+		IF IsConst(x) & IsConst(y) THEN x := G.FoldConst(S.rdiv, x, y)
+		ELSE xtype := x.type; x := NewNode(S.times, x, y); x.type := xtype
+		END
 	ELSIF (sym = S.div) OR (sym = S.mod) DO
 		CheckInt(x); op := sym; GetSym; y := factor(); CheckInt(y);
-		x := NewNode(op, x, y); x.type := B.intType
+		IF IsConst(x) & IsConst(y) THEN x := G.FoldConst(op, x, y)
+		ELSE x := NewNode(op, x, y); x.type := B.intType
+		END
 	ELSIF sym = S.and DO
 		CheckBool(x); GetSym; y := factor(); CheckBool(y);
-		x := NewNode(S.and, x, y); x.type := B.boolType
+		IF IsConst(x) & IsConst(y) THEN x := G.FoldConst(S.and, x, y)
+		ELSE x := NewNode(S.and, x, y); x.type := B.boolType
+		END
 	END;
 	RETURN x
 END term;
@@ -509,16 +526,22 @@ BEGIN
 	ELSIF sym = S.minus THEN
 		GetSym; x := term(); xtype := x.type;
 		Check1(x, {B.tInt, B.tReal, B.tSet});
-		x := NewNode(S.minus, x, NIL); x.type := xtype
+		IF IsConst(x) THEN x := G.NegateConst(x)
+		ELSE x := NewNode(S.minus, x, NIL); x.type := xtype
+		END
 	ELSE x := term()
 	END;
 	WHILE (sym = S.plus) OR (sym = S.minus) DO
 		Check1(x, {B.tInt, B.tReal, B.tSet}); op := sym; GetSym; y := term();
-		IF ~CompTypes(xtype, y.type) THEN Mark('invalid type') END;
-		xtype := x.type; x := NewNode(op, x, y); x.type := xtype
+		IF ~CompTypes(x.type, y.type) THEN Mark('invalid type') END;
+		IF IsConst(x) & IsConst(y) THEN x := G.FoldConst(op, x, y)
+		ELSE xtype := x.type; x := NewNode(op, x, y); x.type := xtype
+		END
 	ELSIF sym = S.or DO
 		CheckBool(x); GetSym; y := term(); CheckBool(y);
-		x := NewNode(S.or, x, y); x.type := B.boolType
+		IF IsConst(x) & IsConst(y) THEN x := G.FoldConst(S.or, x, y)
+		ELSE x := NewNode(S.or, x, y); x.type := B.boolType
+		END
 	END;
 	RETURN x
 END SimpleExpression;
@@ -529,10 +552,15 @@ BEGIN x := SimpleExpression();
 	IF (sym >= S.eql) & (sym <= S.geq) THEN
 		CheckLeft(x, sym); op := sym; GetSym; y := SimpleExpression();
 		IF ~CompTypes2(x.type, y.type) THEN Mark('invalid type') END;
-		x := NewNode(op, x, y); x.type := B.boolType
+		IF IsConst(x) & IsConst(y) THEN x := G.FoldConst(op, x, y)
+		ELSE x := NewNode(op, x, y); x.type := B.boolType
+		END
 	ELSIF sym = S.in THEN
-		CheckInt(x); GetSym; y := SimpleExpression(); CheckSet(y);
-		x := NewNode(S.in, x, y); x.type := B.boolType
+		CheckInt(x); G.CheckSetElement(x);
+		GetSym; y := SimpleExpression(); CheckSet(y);
+		IF IsConst(x) & IsConst(y) THEN x := G.FoldConst(op, x, y)
+		ELSE x := NewNode(S.in, x, y); x.type := B.boolType
+		END
 	ELSIF sym = S.is THEN
 		CheckLeft(x, S.is); GetSym;
 		IF sym = S.ident THEN y := qualident() ELSE Missing(S.ident) END;
@@ -563,7 +591,7 @@ END ConstExpression;
 PROCEDURE StdProc(f: B.SProc): B.Node;
 	VAR x, par, par2: B.Node; y: B.Object;
 BEGIN
-	Check0(S.lparen); x := NewNode(S.sproc, f, NIL); GetSym;
+	Check0(S.lparen); x := NewNode(S.sproc, f, NIL);
 	IF (f.id = 'INC') OR (f.id = 'DEC') THEN
 		y := designator(); CheckInt(y); CheckVar(y, FALSE);
 		par := NewNode(S.par, y, NIL); x.right := par;
@@ -617,7 +645,21 @@ BEGIN
 		par2 := NewNode(S.par, y, NIL); par.right := par2; par := par2;
 		Check0(S.comma); y := expression(); CheckInt(y);
 		par2 := NewNode(S.par, y, NIL); par.right := par2
+	ELSIF f.id = 'LoadLibraryW' THEN
+		y := expression();
+		par := NewNode(S.par, y, NIL); x.right := par;
+		Check0(S.comma); y := expression();
+		par2 := NewNode(S.par, y, NIL); par.right := par2
+	ELSIF f.id = 'GetProcAddress' THEN
+		y := expression();
+		par := NewNode(S.par, y, NIL); x.right := par;
+		Check0(S.comma); y := expression();
+		par2 := NewNode(S.par, y, NIL); par.right := par2; par := par2;
+		Check0(S.comma); y := expression();
+		par2 := NewNode(S.par, y, NIL); par.right := par2
+	ELSE Mark('unsupported');
 	END;
+	Check0(S.rparen);
 	RETURN x
 END StdProc;
 
@@ -649,7 +691,7 @@ PROCEDURE For(): B.Node;
 	VAR x: B.Object; for, control, beg, end: B.Node;
 BEGIN
 	for := NewNode(S.for, NIL, NIL); GetSym;
-	IF sym = S.ident THEN x := FindIdent() ELSE Missing(S.ident) END;
+	IF sym = S.ident THEN x := FindIdent(); GetSym ELSE Missing(S.ident) END;
 	IF (x # NIL) THEN CheckInt(x); CheckVar(x, FALSE) END;
 	control := NewNode(S.null, x, NIL); for.left := control;
 	Check0(S.becomes); x := expression(); CheckInt(x);
@@ -745,6 +787,7 @@ BEGIN
 			repeat.right := x; stat.left := repeat
 		ELSIF sym = S.for THEN stat.left := For()
 		ELSIF sym = S.case THEN stat.left := Case()
+		ELSE Mark('Invalid statement')
 		END;
 		IF sym <= S.semicolon THEN Check0(S.semicolon);
 			nextstat := NewNode(S.semicolon, NIL, NIL);
@@ -999,6 +1042,7 @@ BEGIN
 				x := B.NewVar(tp); ident.obj := x; x.ident := ident;
 				ident := ident.next
 			END;
+			Check0(S.semicolon)
 		END
 	END;
 	WHILE sym = S.procedure DO GetSym;
@@ -1021,7 +1065,7 @@ BEGIN
 		IF sym = S.begin THEN GetSym; proc.statseq := StatementSequence() END;
 		IF sym = S.return THEN
 			IF tp.base = NIL THEN Mark('not function proc') END;
-			x := expression(); proc.return := x;
+			GetSym; x := expression(); proc.return := x;
 			IF x.type.form IN {B.tArray, B.tRec} THEN Mark('invalid type') END                
 		ELSIF tp.base # NIL THEN Missing(S.return)
 		END;	
