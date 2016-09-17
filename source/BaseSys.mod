@@ -62,6 +62,9 @@ VAR
 	): Int;
 	GetStdHandle: PROCEDURE(nStdHandle: Dword): Handle;
 	
+	ConsoleWrite: PROCEDURE(ch: CHAR);
+	ConsoleWriteInt: PROCEDURE(n: INTEGER);
+	
 PROCEDURE ImportProc(
 	VAR proc: ARRAY OF SYSTEM.BYTE;
 	library, name: ARRAY OF CHAR
@@ -152,7 +155,7 @@ PROCEDURE Read2*(VAR file: File; VAR n: INTEGER);
 	VAR bRes: Bool; buf: Word; byteRead: Dword;
 BEGIN
 	bRes := ReadFile(file.handle, SYSTEM.ADR(buf), 2, SYSTEM.ADR(byteRead), 0);
-	IF (bRes = 0) OR (AsDword(byteRead) # 1) THEN n := -1
+	IF (bRes = 0) OR (AsDword(byteRead) # 2) THEN n := -1
 	ELSE n := AsWord(buf)
 	END
 END Read2;
@@ -160,14 +163,15 @@ END Read2;
 PROCEDURE ReadStr*(VAR file: File; VAR str: ARRAY OF CHAR);
 	VAR i, n: INTEGER;
 BEGIN i := -1; n := 0;
-	REPEAT INC(i); Read2(file, n); str[i] := CHR(n) UNTIL n = 0
+	REPEAT INC(i); Read2(file, n); IF n = -1 THEN n := 0 END; str[i] := CHR(n)
+	UNTIL n = 0
 END ReadStr;
 	
 PROCEDURE Read4*(VAR file: File; VAR n: INTEGER);
 	VAR bRes: Bool; buf, byteRead: Dword;
 BEGIN
 	bRes := ReadFile(file.handle, SYSTEM.ADR(buf), 4, SYSTEM.ADR(byteRead), 0);
-	IF (bRes = 0) OR (AsDword(byteRead) # 1) THEN n := -1
+	IF (bRes = 0) OR (AsDword(byteRead) # 4) THEN n := -1
 	ELSE n := AsDword(buf)
 	END
 END Read4;
@@ -208,16 +212,16 @@ BEGIN
 	)
 END Write2;
 
-PROCEDURE WriteStr*(VAR file: File; VAR str: ARRAY OF CHAR);
+PROCEDURE WriteStr*(VAR file: File; str: ARRAY OF CHAR);
 	VAR i, n: INTEGER;
 BEGIN i := -1; n := 0;
-	REPEAT INC(i); Write2(file, n); str[i] := CHR(n) UNTIL n = 0
+	REPEAT INC(i); Write2(file, ORD(str[i])) UNTIL str[i] = 0X
 END WriteStr;
 
-PROCEDURE WriteAnsiStr*(VAR file: File; VAR str: ARRAY OF CHAR);
+PROCEDURE WriteAnsiStr*(VAR file: File; str: ARRAY OF CHAR);
 	VAR i, n: INTEGER;
 BEGIN i := -1; n := 0;
-	REPEAT INC(i); Write1(file, n); str[i] := CHR(n) UNTIL n = 0
+	REPEAT INC(i); Write1(file, ORD(str[i])) UNTIL str[i] = 0X
 END WriteAnsiStr;
 	
 PROCEDURE Write4*(VAR file: File; n: INTEGER);
@@ -411,7 +415,9 @@ BEGIN
 	ImportProc(GetTickCount_, Kernel32, 'GetTickCount');
 	ImportProc(GetCommandLineW, Kernel32, 'GetCommandLineW');
 	ImportProc(WideCharToMultiByte, Kernel32, 'WideCharToMultiByte');
-	ImportProc(GetStdHandle, Kernel32, 'GetStdHandle')
+	ImportProc(GetStdHandle, Kernel32, 'GetStdHandle');
+	ConsoleWrite := Console_Write;
+	ConsoleWriteInt := Console_WriteInt
 END Init;
 
 BEGIN Init

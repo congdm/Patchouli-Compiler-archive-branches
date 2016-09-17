@@ -284,7 +284,7 @@ END FindIdent;
 PROCEDURE qualident(): B.Object;
 	VAR x: B.Object; ident: B.Ident;
 BEGIN x := FindIdent(); GetSym;
-	IF (x IS B.Module) & (sym = S.period) THEN GetSym;
+	IF (x # NIL) & (x IS B.Module) & (sym = S.period) THEN GetSym;
 		IF sym = S.ident THEN
 			ident := x(B.Module).first;
 			WHILE (ident # NIL) & (ident.name # S.id) DO
@@ -295,7 +295,7 @@ BEGIN x := FindIdent(); GetSym;
 			END; GetSym
 		ELSE Missing(S.ident); x := NIL
 		END
-	ELSIF x IS B.Module THEN x := NIL
+	ELSIF (x # NIL) & (x IS B.Module) THEN x := NIL
 	END;
 	RETURN x
 END qualident;
@@ -1120,9 +1120,11 @@ BEGIN
 		END;
 		Check0(S.period);
 	END;
-	
+	IF S.errcnt = 0 THEN B.WriteSymfile END;
 	IF S.errcnt = 0 THEN
-		B.WriteSymfile
+		Sys.Console_WriteStr('Created symbol file: ');
+		Sys.Console_WriteStr(modid); Sys.Console_WriteStr('.sym');
+		Sys.Console_WriteLn
 	END
 END Module;
 	

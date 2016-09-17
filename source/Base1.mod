@@ -124,6 +124,13 @@ BEGIN n := 0; i := 1; k := 1;
 	UNTIL finish
 END ReadInt;
 
+PROCEDURE AppendStr(ext: ARRAY OF CHAR; VAR dst: ARRAY OF CHAR);
+	VAR i, k: INTEGER;
+BEGIN i := 0; WHILE dst[i] # 0X DO INC(i) END;
+	k := 0; WHILE ext[k] # 0X DO dst[i+k] := ext[k]; INC(k) END;
+	dst[i+k] := 0X
+END AppendStr;
+
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 	
@@ -361,6 +368,7 @@ END WriteModkey;
 PROCEDURE WriteSymfile*;
 	VAR ident, exp: Ident; i, k, n, size: INTEGER; mod: Module;
 		hash: Crypt.MD5Hash; chunk: ARRAY 64 OF BYTE;
+		filename: String;
 BEGIN
 	refno := 0; expno := 0;
 	Sys.Rewrite(symfile, 'sym.temp_'); Sys.Seek(symfile, 16);
@@ -414,14 +422,20 @@ BEGIN
 	REPEAT k := 0;
 		REPEAT Sys.Read1(symfile, n); chunk[k] := n; INC(i); INC(k)
 		UNTIL (i = size) OR (k = 64);
-		Crypt.MD5ComputeChunk(hash, chunk, k * 8)
+		Crypt.MD5ComputeChunk(hash, SYSTEM.ADR(chunk), k)
 	UNTIL i = size;
 	
 	Sys.Seek(symfile, 0);
 	modkey[0] := Crypt.MD5GetLowResult(hash);
 	modkey[1] := Crypt.MD5GetHighResult(hash);
 	WriteModkey(modkey);
-	Sys.Close(symfile)
+	Sys.Close(symfile);
+	
+	IF S.errcnt = 0 THEN filename[0] := 0X;
+		AppendStr(modid, filename); AppendStr('.sym', filename);
+		Sys.Delete(filename); Sys.Rename('sym.temp_', filename)
+	ELSE Sys.Delete('sym.temp_')
+	END
 END WriteSymfile;
 
 (* -------------------------------------------------------------------------- *)
@@ -436,13 +450,6 @@ BEGIN
 	END;
 	RETURN module
 END FindModule;
-
-PROCEDURE AppendStr(ext: ARRAY OF CHAR; VAR dst: ARRAY OF CHAR);
-	VAR i, k: INTEGER;
-BEGIN i := 0; WHILE dst[i] # 0X DO INC(i) END;
-	k := 0; WHILE ext[k] # 0X DO dst[i+k] := ext[k]; INC(k) END;
-	dst[i+k] := 0X
-END AppendStr;
 
 PROCEDURE NewImportIdent(ident: Ident; name: IdStr; x: Object): Ident;
 BEGIN
@@ -502,6 +509,9 @@ PROCEDURE ImportType(VAR typ: Type);
 BEGIN
 	ReadInt(symfile, ref); ReadInt(symfile, exp);
 	ReadInt(symfile, form);
+	Sys.Console_WriteInt(ref); Sys.Console_WriteLn;
+	Sys.Console_WriteInt(exp); Sys.Console_WriteLn;
+	Sys.Console_WriteInt(form);	Sys.Console_WriteLn;
 	IF form = tRec THEN
 		typ := NewRecord(); AddToTypeList(typ);
 		typ.ref := ref; typ.mod := -(curLev+1);
@@ -531,6 +541,10 @@ BEGIN
 	Sys.Read8(symfile, key[1])
 END ReadModkey;
 
+PROCEDURE Print(str: ARRAY OF CHAR);
+BEGIN Sys.Console_WriteStr(str); Sys.Console_WriteLn
+END Print;
+
 PROCEDURE ImportModules*;
 	VAR ident: Ident; x: Object; cls, i, val, slen: INTEGER;
 		module: Module; name: IdStr; tp: Type; unusedmk: ModuleKey;
@@ -543,21 +557,21 @@ BEGIN
 		ReadInt(symfile, cls);
 		WHILE cls # cNull DO
 			IF cls = cConst THEN
-				Sys.ReadStr(symfile, name); ReadInt(symfile, val);
+				Sys.ReadStr(symfile, name); Print(name);ReadInt(symfile, val);
 				DetectTypeI(tp); x := NewConst(tp, val);
 				ident := NewImportIdent(ident, name, x)
 			ELSIF cls = cType THEN
-				Sys.ReadStr(symfile, name); DetectTypeI(tp);
+				Sys.ReadStr(symfile, name); Print(name);DetectTypeI(tp);
 				x := NewTypeObj(tp); ident := NewImportIdent(ident, name, x)
 			ELSIF cls = cVar THEN
-				Sys.ReadStr(symfile, name);
+				Sys.ReadStr(symfile, name);Print(name);
 				ReadInt(symfile, val); DetectTypeI(tp);
 				IF tp # strType THEN x := NewVar(tp); x(Var).ronly := TRUE
 				ELSE ReadInt(symfile, slen); x := NewStr('', slen)
 				END;
 				x(Var).adr := val; ident := NewImportIdent(ident, name, x)
 			ELSIF cls = cProc THEN
-				Sys.ReadStr(symfile, name); x := NewProc();
+				Sys.ReadStr(symfile, name); Print(name);x := NewProc();
 				ReadInt(symfile, x(Proc).adr); ImportProc(x.type); 
 				ident := NewImportIdent(ident, name, x)
 			ELSIF cls = cModule THEN (* ignore *)
