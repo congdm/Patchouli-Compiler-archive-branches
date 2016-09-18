@@ -235,8 +235,10 @@ END NewRecord;
 
 PROCEDURE ExtendRecord*(recType: Type);
 BEGIN
-	recType.len := recType.base.len + 1;
-	recType.nptr := recType.base.nptr
+	IF recType.base # NIL THEN
+		recType.len := recType.base.len + 1;
+		recType.nptr := recType.base.nptr
+	END
 END ExtendRecord;
 
 PROCEDURE NewPointer*(): Type;
@@ -509,9 +511,6 @@ PROCEDURE ImportType(VAR typ: Type);
 BEGIN
 	ReadInt(symfile, ref); ReadInt(symfile, exp);
 	ReadInt(symfile, form);
-	Sys.Console_WriteInt(ref); Sys.Console_WriteLn;
-	Sys.Console_WriteInt(exp); Sys.Console_WriteLn;
-	Sys.Console_WriteInt(form);	Sys.Console_WriteLn;
 	IF form = tRec THEN
 		typ := NewRecord(); AddToTypeList(typ);
 		typ.ref := ref; typ.mod := -(curLev+1);
@@ -541,10 +540,6 @@ BEGIN
 	Sys.Read8(symfile, key[1])
 END ReadModkey;
 
-PROCEDURE Print(str: ARRAY OF CHAR);
-BEGIN Sys.Console_WriteStr(str); Sys.Console_WriteLn
-END Print;
-
 PROCEDURE ImportModules*;
 	VAR ident: Ident; x: Object; cls, i, val, slen: INTEGER;
 		module: Module; name: IdStr; tp: Type; unusedmk: ModuleKey;
@@ -557,23 +552,25 @@ BEGIN
 		ReadInt(symfile, cls);
 		WHILE cls # cNull DO
 			IF cls = cConst THEN
-				Sys.ReadStr(symfile, name); Print(name);ReadInt(symfile, val);
+				Sys.ReadStr(symfile, name);
+				ReadInt(symfile, val);
 				DetectTypeI(tp); x := NewConst(tp, val);
-				ident := NewImportIdent(ident, name, x)
+				ident := NewImportIdent(ident, name, x); ASSERT(ident # NIL);
 			ELSIF cls = cType THEN
-				Sys.ReadStr(symfile, name); Print(name);DetectTypeI(tp);
-				x := NewTypeObj(tp); ident := NewImportIdent(ident, name, x)
+				Sys.ReadStr(symfile, name);
+				DetectTypeI(tp); x := NewTypeObj(tp);
+				ident := NewImportIdent(ident, name, x); ASSERT(ident # NIL);
 			ELSIF cls = cVar THEN
-				Sys.ReadStr(symfile, name);Print(name);
+				Sys.ReadStr(symfile, name);
 				ReadInt(symfile, val); DetectTypeI(tp);
 				IF tp # strType THEN x := NewVar(tp); x(Var).ronly := TRUE
 				ELSE ReadInt(symfile, slen); x := NewStr('', slen)
-				END;
-				x(Var).adr := val; ident := NewImportIdent(ident, name, x)
+				END; x(Var).adr := val;
+				ident := NewImportIdent(ident, name, x); ASSERT(ident # NIL);
 			ELSIF cls = cProc THEN
-				Sys.ReadStr(symfile, name); Print(name);x := NewProc();
+				Sys.ReadStr(symfile, name); x := NewProc();
 				ReadInt(symfile, x(Proc).adr); ImportProc(x.type); 
-				ident := NewImportIdent(ident, name, x)
+				ident := NewImportIdent(ident, name, x); ASSERT(ident # NIL);
 			ELSIF cls = cModule THEN (* ignore *)
 				Sys.ReadStr(symfile, name); ReadModkey(unusedmk)
 			END;

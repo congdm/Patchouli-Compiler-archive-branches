@@ -1,7 +1,7 @@
 MODULE SymTable;
 
 IMPORT
-	Strings, Crypt, Console, Base, Scanner;
+	SYSTEM, Strings, Crypt, Console, Base, Scanner;
 
 TYPE
 	ModuleKey* = ARRAY 2 OF INTEGER;
@@ -584,7 +584,7 @@ BEGIN
 	REPEAT k := 0;
 		REPEAT Base.Read_byte (symfile, n); chunk[k] := n; INC (i); INC (k)
 		UNTIL (i = size) OR (k = 64);
-		Crypt.MD5ComputeChunk (hash, chunk, k * 8)
+		Crypt.MD5ComputeChunk(hash, SYSTEM.ADR(chunk), k)
 	UNTIL i = size;
 	
 	Base.Seek (symfile, 0);

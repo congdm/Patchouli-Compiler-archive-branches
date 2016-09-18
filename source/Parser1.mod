@@ -288,10 +288,11 @@ BEGIN x := FindIdent(); GetSym;
 		IF sym = S.ident THEN
 			ident := x(B.Module).first;
 			WHILE (ident # NIL) & (ident.name # S.id) DO
+				Sys.Console_WriteStr(ident.name); Sys.Console_WriteLn;
 				ident := ident.next
 			END;
-			IF ident = NIL THEN Mark('not found'); x := NIL
-			ELSE x := ident.obj
+			IF ident # NIL THEN x := ident.obj
+			ELSE Mark('not found'); x := NIL
 			END; GetSym
 		ELSE Missing(S.ident); x := NIL
 		END
