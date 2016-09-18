@@ -1934,7 +1934,8 @@ BEGIN
 	
 	Call (c); Return_value (proc, c.rtype); EmitRI (ADDi, proc.r, 8, 16);
 	Make_item (td, bType.obj); Get_typedesc (td); Load_adr (td);
-	SetRmOperand_regI (proc.r, -8); EmitRegRm (MOV, td.r, 8); Store (x, proc)
+	SetRmOperand_regI (proc.r, -8); EmitRegRm (MOV, td.r, 8); Free_reg;
+	Store (x, proc)
 END SProc_NEW;
 
 PROCEDURE SProc_DISPOSE* (VAR c: ProcCall);

@@ -5,114 +5,99 @@ IMPORT
 	
 TYPE
 	MD5Hash* = RECORD
-		a0, b0, c0, d0: CARD32; msgLen: INTEGER
+		a0, b0, c0, d0: INTEGER; msgLen: INTEGER
 	END;
-	MD5Chunk = ARRAY 16 OF CARD32;
+	MD5Chunk = ARRAY 64 OF BYTE;
 	
 VAR
 	MD5State: RECORD
-		s, K: ARRAY 64 OF CARD32
+		s, K: ARRAY 64 OF INTEGER
 	END;
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 (* MD5 *)
 
-PROCEDURE InitMD5Hash* (VAR hash: MD5Hash);
+PROCEDURE InitMD5Hash*(VAR hash: MD5Hash);
 BEGIN
 	hash.a0 := 67452301H; hash.b0 := 0EFCDAB89H;
 	hash.c0 := 98BADCFEH; hash.d0 := 10325476H;
 	hash.msgLen := 0
 END InitMD5Hash;
 
-PROCEDURE MD5ComputeChunk* (
-	VAR hash: MD5Hash; chunk: ARRAY OF SYSTEM.BYTE; lenInBit: INTEGER
-);
-	VAR i, g, j, k: INTEGER; s: SET; byte: BYTE;
-		M: MD5Chunk;
-	
-	PROCEDURE Compute (VAR hash: MD5Hash; M: MD5Chunk);
-		VAR A, B, C, D, dTemp: SET; F: CARD32;
-			i, g: INTEGER;
-			
-		PROCEDURE LeftRot32 (n: CARD32; cnt: INTEGER) : CARD32;
-		BEGIN cnt := cnt MOD 32;
-			RETURN (LSL(n, cnt) + ASR(n, 32 - cnt)) MOD 100000000H
-		END LeftRot32;
-	
-	BEGIN (* Compute *)
-		A := SYSTEM.VAL(SET, hash.a0);
-		B := SYSTEM.VAL(SET, hash.b0);
-		C := SYSTEM.VAL(SET, hash.c0);
-		D := SYSTEM.VAL(SET, hash.d0);
-		FOR i := 0 TO 63 DO
-			IF (i >= 0) & (i <= 15) THEN
-				F := ORD(B * C + ((-B) * D));
-				g := i
-			ELSIF (i >= 16) & (i <= 31) THEN
-				F := ORD(D * B + ((-D) * C));
-				g := (5 * i + 1) MOD 16
-			ELSIF (i >= 32) & (i <= 47) THEN
-				F := ORD(B / C / D);
-				g := (3 * i + 5) MOD 16
-			ELSIF (i >= 48) & (i <= 63) THEN
-				F := ORD(C / (B + (-D)));
-				g := (7 * i) MOD 16
-			END;
-			dTemp := D;
-			D := C;
-			C := B;
-			B := SYSTEM.VAL(SET, ORD(B) + LeftRot32(ORD(A) + F + MD5State.K[i] + M[g], MD5State.s[i]));
-			B := SYSTEM.VAL(SET, ORD(B) MOD 100000000H);
-			A := dTemp
+PROCEDURE LeftRot32(n: INTEGER; cnt: INTEGER): INTEGER;
+BEGIN cnt := cnt MOD 32; n := n MOD 100000000H;
+	RETURN (LSL(n, cnt) + ASR(n, 32 - cnt)) MOD 100000000H
+END LeftRot32;
+
+PROCEDURE Compute(VAR hash: MD5Hash; M: MD5Chunk);
+	VAR A, B, C, D, dTemp: SET; F: INTEGER;
+		i, g, x: INTEGER;
+BEGIN
+	A := SYSTEM.VAL(SET, hash.a0);
+	B := SYSTEM.VAL(SET, hash.b0);
+	C := SYSTEM.VAL(SET, hash.c0);
+	D := SYSTEM.VAL(SET, hash.d0);
+	FOR i := 0 TO 63 DO
+		IF (i >= 0) & (i <= 15) THEN
+			F := ORD(B * C + ((-B) * D));
+			g := i
+		ELSIF (i >= 16) & (i <= 31) THEN
+			F := ORD(D * B + ((-D) * C));
+			g := (5 * i + 1) MOD 16
+		ELSIF (i >= 32) & (i <= 47) THEN
+			F := ORD(B / C / D);
+			g := (3 * i + 5) MOD 16
+		ELSIF (i >= 48) & (i <= 63) THEN
+			F := ORD(C / (B + (-D)));
+			g := (7 * i) MOD 16
 		END;
-		hash.a0 := (hash.a0 + ORD(A)) MOD 100000000H;
-		hash.b0 := (hash.b0 + ORD(B)) MOD 100000000H;
-		hash.c0 := (hash.c0 + ORD(C)) MOD 100000000H;
-		hash.d0 := (hash.d0 + ORD(D)) MOD 100000000H
-	END Compute;
-	
-BEGIN (* MD5ComputeChunk *)
-	ASSERT (LEN(chunk) * 8 >= lenInBit);
-	SYSTEM.COPY (SYSTEM.ADR(chunk), SYSTEM.ADR(M), LEN(chunk));
-	IF lenInBit = 512 THEN
-		hash.msgLen := hash.msgLen + 512; Compute (hash, M)
-	ELSIF lenInBit < 448 THEN
-		i := lenInBit DIV 32; g := lenInBit MOD 32;
-		j := g DIV 8 * 8; k := j + (7 - g MOD 8);
-		s := {k..7+j};
-		IF j > 0 THEN s := s + {0..j-1} END;
-		IF j < 24 THEN s := s - {j+8..31} END;
-		M[i] := ORD((SYSTEM.VAL(SET, M[i]) + {k}) * s);
-		INC (i); WHILE i < 14 DO M[i] := 0; INC (i) END;
-		SYSTEM.PUT (SYSTEM.ADR(M[14]), hash.msgLen + lenInBit);
-		Compute (hash, M)
+		dTemp := D;
+		D := C;
+		C := B;
+		x := M[g*4] + M[g*4+1]*100H + M[g*4+2]*10000H + M[g*4+3]*1000000H;
+		x := LeftRot32(ORD(A) + F + MD5State.K[i] + x, MD5State.s[i]);
+		B := SYSTEM.VAL(SET, ORD(B) + x) * {0..31};
+		A := dTemp
+	END;
+	hash.a0 := (hash.a0 + ORD(A)) MOD 100000000H;
+	hash.b0 := (hash.b0 + ORD(B)) MOD 100000000H;
+	hash.c0 := (hash.c0 + ORD(C)) MOD 100000000H;
+	hash.d0 := (hash.d0 + ORD(D)) MOD 100000000H
+END Compute;
+
+PROCEDURE MD5ComputeChunk*(VAR hash: MD5Hash; chunkAdr, chunkLen: INTEGER);
+	VAR i, g, j, k: INTEGER; s: SET; M: MD5Chunk;
+BEGIN
+	ASSERT(chunkLen <= 64); SYSTEM.COPY(chunkAdr, SYSTEM.ADR(M), chunkLen);
+	hash.msgLen := hash.msgLen + chunkLen * 8;
+	IF chunkLen = 64 THEN Compute(hash, M)
+	ELSIF chunkLen < 56 THEN
+		M[chunkLen] := 80H; i := chunkLen + 1;
+		WHILE i < 56 DO M[i] := 0; INC(i) END;
+		SYSTEM.PUT(SYSTEM.ADR(M[56]), hash.msgLen);
+		Compute(hash, M)
 	ELSE
-		i := lenInBit DIV 32; g := lenInBit MOD 32;
-		j := g DIV 8 * 8; k := j + (7 - g MOD 8);
-		s := {k..7+j};
-		IF j > 0 THEN s := s + {0..j-1} END;
-		IF j < 24 THEN s := s + {j+8..31} END;
-		M[i] := ORD((SYSTEM.VAL(SET, M[i]) + {k}) * s);
-		INC (i); WHILE i < 16 DO M[i] := 0; INC (i) END;
-		Compute (hash, M);
-		i := 0; WHILE i < 14 DO M[i] := 0; INC (i) END;
-		SYSTEM.PUT (SYSTEM.ADR(M[14]), hash.msgLen + lenInBit);
-		Compute (hash, M)
+		M[chunkLen] := 80H; i := chunkLen + 1;
+		WHILE i < 64 DO M[i] := 0; INC(i) END;
+		Compute(hash, M);
+		i := 0; WHILE i < 56 DO M[i] := 0; INC(i) END;
+		SYSTEM.PUT(SYSTEM.ADR(M[56]), hash.msgLen);
+		Compute(hash, M)
 	END
 END MD5ComputeChunk;
 
-PROCEDURE MD5Compute* (
-	VAR hash: MD5Hash; chunk: ARRAY OF SYSTEM.BYTE; lenInBit: INTEGER
+PROCEDURE MD5Compute*(
+	VAR hash: MD5Hash; chunk: ARRAY OF SYSTEM.BYTE; lenInByte: INTEGER
 );
-	VAR adr: INTEGER;
+	VAR chunkAdr: INTEGER;
 BEGIN
-	ASSERT (LEN(chunk) * 8 >= lenInBit); adr := SYSTEM.ADR(chunk);
-	WHILE lenInBit >= 512 DO
-		MD5ComputeChunk (hash, adr{MD5Chunk}, 512);
-		lenInBit := lenInBit - 512; adr := adr + 64
+	ASSERT(LEN(chunk) >= lenInByte); chunkAdr := SYSTEM.ADR(chunk);
+	WHILE lenInByte >= 64 DO
+		MD5ComputeChunk(hash, chunkAdr, 64);
+		lenInByte := lenInByte - 64; chunkAdr := chunkAdr + 64
 	END;
-	MD5ComputeChunk (hash, adr{MD5Chunk}, lenInBit)
+	MD5ComputeChunk(hash, chunkAdr, lenInByte)
 END MD5Compute;
 
 PROCEDURE MD5GetLowResult* (VAR hash: MD5Hash) : INTEGER;
