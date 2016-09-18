@@ -4,3 +4,4 @@ source/*.sym
 test/*.exe
 test/*.dll
 test/*.sym
+source/.vs/
