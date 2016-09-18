@@ -163,7 +163,8 @@ END Read2;
 PROCEDURE ReadStr*(VAR file: File; VAR str: ARRAY OF CHAR);
 	VAR i, n: INTEGER;
 BEGIN i := -1; n := 0;
-	REPEAT INC(i); Read2(file, n); IF n = -1 THEN n := 0 END; str[i] := CHR(n)
+	REPEAT INC(i); Read2(file, n);
+		IF n = -1 THEN n := 0 END; str[i] := CHR(n)
 	UNTIL n = 0
 END ReadStr;
 	
@@ -177,9 +178,10 @@ BEGIN
 END Read4;
 	
 PROCEDURE Read8*(VAR file: File; VAR n: INTEGER);
-	VAR bRes: Bool; byteRead: Dword;
+	VAR bRes: Bool; byteRead: Dword; buf: INTEGER;
 BEGIN
-	bRes := ReadFile(file.handle, SYSTEM.ADR(n), 8, SYSTEM.ADR(byteRead), 0)
+	bRes := ReadFile(file.handle, SYSTEM.ADR(buf), 8, SYSTEM.ADR(byteRead), 0);
+	n := buf
 END Read8;
 
 PROCEDURE ReadBytes*(

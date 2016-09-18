@@ -1,7 +1,8 @@
 MODULE Parser1;
 
 IMPORT
-	Sys := BaseSys, B := Base1, S := Scanner1, G := Generator1;
+	Sys := BaseSys, Crypt,
+	S := Scanner1, B := Base1, G := Generator1;
 	
 TYPE
 	UndefPtrList = POINTER TO RECORD
@@ -142,25 +143,32 @@ PROCEDURE TypeTestable(x: B.Object): BOOLEAN;
 	OR (x.type.form = B.tRec) & IsVarPar(x)
 END TypeTestable;
 
+PROCEDURE CheckVar(x: B.Object; ronly: BOOLEAN);
+BEGIN
+	IF (x.class = B.cVar) OR (x.class = B.cRef) THEN
+		IF ~ronly & x(B.Var).ronly THEN Mark('read only') END
+	ELSIF (x.class = B.cNode) & (x(B.Node).op = S.designator) THEN
+		IF ~ronly & x(B.Node).ronly THEN Mark('read only') END
+	ELSE Mark('not var')
+	END
+END CheckVar;
+
 PROCEDURE CheckPar(fpar: B.Var; x: B.Object);
 	VAR xtype, ftype: B.Type; xform, fform: INTEGER;
 BEGIN xtype := x.type; ftype := fpar.type;
 	IF fpar.class = B.cVar THEN
 		IF ~CompTypes(ftype, xtype) THEN Mark('invalid type') END
 	ELSIF fpar.class = B.cRef THEN
-		IF x IS B.Var THEN xform := xtype.form; fform := ftype.form;
-			IF x(B.Var).ronly & ~fpar.ronly THEN Mark('read only') END;
-			IF (xtype = ftype)
-			OR (fform = B.tRec) & (xform = B.tRec) & IsExt(xtype, ftype)
-			OR IsOpenArray(ftype) & (xform = B.tArray)
-				& (ftype.base = xtype.base)
-			OR (fform = B.tArray) & (xform = B.tArray)
-				& (ftype.base = xtype.base) & (ftype.len = xtype.len)
-			OR IsOpenArray(ftype) & (ftype.base = B.byteType)
-			OR IsStr(xtype) & IsStr(ftype)
-			THEN (*valid*) ELSE Mark('invalid type')
-			END
-		ELSE Mark('not var')
+		CheckVar(x, fpar.ronly); xform := xtype.form; fform := ftype.form;
+		IF (xtype = ftype)
+		OR (fform = B.tRec) & (xform = B.tRec) & IsExt(xtype, ftype)
+		OR IsOpenArray(ftype) & (xform = B.tArray)
+			& (ftype.base = xtype.base)
+		OR (fform = B.tArray) & (xform = B.tArray)
+			& (ftype.base = xtype.base) & (ftype.len = xtype.len)
+		OR IsOpenArray(ftype) & (ftype.base = B.byteType)
+		OR IsStr(xtype) & IsStr(ftype)
+		THEN (*valid*) ELSE Mark('invalid type')
 		END
 	END
 END CheckPar;
@@ -183,16 +191,6 @@ PROCEDURE Check1(x: B.Object; forms: SET);
 BEGIN
 	IF ~(x.type.form IN forms) THEN Mark(ivlType) END
 END Check1;
-
-PROCEDURE CheckVar(x: B.Object; ronly: BOOLEAN);
-BEGIN
-	IF (x.class = B.cVar) OR (x.class = B.cRef) THEN
-		IF ~ronly & x(B.Var).ronly THEN Mark('read only') END
-	ELSIF (x.class = B.cNode) & (x(B.Node).op = S.designator) THEN
-		IF ~ronly & x(B.Node).ronly THEN Mark('read only') END
-	ELSE Mark('not var')
-	END
-END CheckVar;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -288,7 +286,6 @@ BEGIN x := FindIdent(); GetSym;
 		IF sym = S.ident THEN
 			ident := x(B.Module).first;
 			WHILE (ident # NIL) & (ident.name # S.id) DO
-				Sys.Console_WriteStr(ident.name); Sys.Console_WriteLn;
 				ident := ident.next
 			END;
 			IF ident # NIL THEN x := ident.obj
@@ -320,11 +317,11 @@ BEGIN x := qualident();
 				IF fld # NIL THEN y := fld.obj;
 					IF node = NIL THEN node := NewDesignator(x); x := node END;
 					next := NewNode(S.period, y, NIL); node.right := next;
-					node := next; x.type := y.type
-				ELSIF recType.lev = 0 THEN Mark('Field not found')
+					node := next; x.type := y.type; x(B.Node).ronly := FALSE
 				ELSE recType := recType.base
-				END
-			UNTIL (fld # NIL) OR (recType.lev = 0);
+				END;
+				IF recType = NIL THEN Mark('Field not found') END
+			UNTIL (fld # NIL) OR (recType = NIL);
 			GetSym
 		END
 	ELSIF sym = S.lbrak DO
@@ -440,9 +437,9 @@ BEGIN
 	IF sym # S.rbrace THEN y := element();
 		IF IsConst(y) THEN const := G.FoldConst(S.plus, const, y)
 		ELSE node := NewNode(S.comma, y, NIL);
-			x := NewNode(S.lbrace, const, node)
+			x := NewNode(S.lbrace, const, node); x.type := B.setType
 		END;
-		WHILE sym = S.comma DO
+		WHILE sym = S.comma DO GetSym;
 			IF sym # S.rbrace THEN y := element();
 				IF IsConst(y) THEN const := G.FoldConst(S.plus, const, y)
 				ELSE next := NewNode(S.comma, y, NIL);
@@ -788,7 +785,6 @@ BEGIN
 			repeat.right := x; stat.left := repeat
 		ELSIF sym = S.for THEN stat.left := For()
 		ELSIF sym = S.case THEN stat.left := Case()
-		ELSE Mark('Invalid statement')
 		END;
 		IF sym <= S.semicolon THEN Check0(S.semicolon);
 			nextstat := NewNode(S.semicolon, NIL, NIL);
@@ -846,7 +842,8 @@ BEGIN
 	Check0(S.colon); tp := FormalType(); ident := first;
 	ronly := (cls = B.cVar) & (tp.form IN {B.tArray, B.tRec});
 	WHILE ident # NIL DO
-		ident.obj := B.NewPar(proc, tp, cls, ronly); ident := ident.next
+		ident.obj := B.NewPar(proc, tp, cls, ronly);
+		ident.obj.ident := ident; ident := ident.next
 	END
 END FPSection;
 
@@ -895,7 +892,8 @@ BEGIN
 		GetSym
 	ELSIF sym = S.record THEN ptrType.base := type0()
 	ELSE Mark('base type?')
-	END
+	END;
+	RETURN ptrType
 END PointerType;
 
 PROCEDURE FieldList(rec: B.Type);

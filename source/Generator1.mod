@@ -1,7 +1,9 @@
 MODULE Generator1;
 
 IMPORT
-	SYS := SYSTEM, B := Base1, S := Scanner1;
+	SYS := SYSTEM,
+	Crypt, BaseSys,
+	S := Scanner1, B := Base1;
 
 CONST
 	MaxInt = 9223372036854775807;
