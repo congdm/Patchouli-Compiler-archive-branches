@@ -1,13 +1,368 @@
 MODULE Generator1;
 
 IMPORT
-	SYS := SYSTEM,
-	Crypt, BaseSys,
+	SYSTEM, BaseSys,
 	S := Scanner1, B := Base1;
 
 CONST
 	MaxInt = 9223372036854775807;
-	MinInt = -MaxInt-1;	
+	MinInt = -MaxInt-1;
+	
+	MaxSize = 80000000H; (* 2GB limit *)
+	
+	reg_A = 0; reg_C = 1; reg_D = 2; reg_B = 3;
+	reg_SP = 4; reg_BP = 5; reg_SI = 6; reg_DI = 7;
+	reg_R8 = 8; reg_R9 = 9; reg_R10 = 10; reg_R11 = 11;
+	reg_R12 = 12; reg_R13 = 13; reg_R14 = 14; reg_R15 = 15;
+	
+	ccO = 0; ccNO = 1; ccB = 2; ccAE = 3; ccZ = 4; ccNZ = 5; ccBE = 6; ccA = 7;
+	ccS = 8; ccNS = 9; ccP = 10; ccNP = 11; ccL = 12; ccGE = 13; ccLE = 14;
+	ccG = 15; ccAlways = 16; ccNever = 17;
+	ccC = ccB; ccNC = ccAE;
+	
+	(* Opcodes used with EmitRegRm *)
+	ADD = 00H; ADDd = 02H; AND = 20H; ANDd = 22H; XOR = 30H; XORd = 32H;
+	TEST = 84H; XCHG = 86H; 
+	OR_ = 08H; ORd = 0AH; SUB = 28H; SUBd = 2AH; CMP = 38H; CMPd = 3AH;
+	MOV = 88H; MOVd = 8AH; LEA = 8DH;
+	BT = 0A30FH; BTR = 0B30FH;
+	BTS = 0AB0FH; IMUL = 0AF0FH;
+	
+	(* Opcodes used with EmitRm *)
+	POP = 8FH; ROR1 = 1D0H; RORcl = 1D2H; SHL1 = 4D0H; SHLcl = 4D2H;
+	SHR1 = 5D0H; SHRcl = 5D2H; SAR1 = 7D0H; SARcl = 7D2H;
+	NOT = 2F6H; NEG = 3F6H; IDIVa = 7F7H; _INC = 0FEH; _DEC = 1FEH;
+	CALL = 2FFH; JMP = 4FFH; PUSH = 6FFH;
+	LDMXCSR = 2AE0FH; STMXCSR = 3AE0FH;
+	
+	(* Opcodes used with EmitRmImm *)
+	ADDi = 80H; ORi = 180H; ANDi = 480H; SUBi = 580H; XORi = 680H; CMPi = 780H;
+	RORi = 1C0H; SHLi = 4C0H; SHRi = 5C0H; SARi = 7C0H; MOVi = 0C6H;
+	TESTi = 76H; BTi = 4BA0FH; BTSi = 5BA0FH; BTRi = 6BA0FH; BTCi = 7BA0FH;
+	IMULi = 69H (* Special case *);
+	
+	(* Opcodes used with EmitBare *)
+	CQO = 9948H; LEAVE = 0C9H; RET = 0C3H; INT3 = 0CCH;
+	
+	(* REP instructions *)
+	MOVSrep = 0A4H;
+	
+	(* Opcodes used with EmitXmmRm *)
+	SeeMOVD = 6E0F66H; SeeMOVDd = 7E0F66H; MOVSS = 100FF3H; MOVSSd = 110FF3H;
+	ADDSS = 580FF3H; MULSS = 590FF3H; SUBSS = 5C0FF3H; DIVSS = 5E0FF3H;
+	ADDPS = 580F00H; MULPS = 590F00H; SUBPS = 5C0F00H; DIVPS = 5E0F00H;
+	ANDPS = 540F00H; ANDNPS = 550F00H; ORPS = 560F00H; XORPS = 570F00H;
+	MOVAPS = 280F00H; MOVAPSd = 290F00H; COMISS = 2F0F00H;
+	CVTSS2SI = 2D0FF3H; CVTSI2SS = 2A0FF3H;
+	
+TYPE
+	Proc = POINTER TO RECORD
+		usedRegs: SET; adr, parWindowSize: INTEGER;
+		prologue, epilogue, body, prologSize, epilogSize, bodySize: INTEGER;
+		regSavingStackSize, regSavingStackPos: INTEGER;
+		next: Proc
+	END;
+	
+VAR
+	code: ARRAY 200000H OF BYTE; cpos: INTEGER;
+	procList, curProc: Proc;
+	
+	stack, bssSize, staticSize: INTEGER;
+	mem: RECORD
+		mod, rm, bas, idx, scl, disp: INTEGER
+	END;
+	
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+(* Machine code emitter *)
+
+PROCEDURE Put1(n: INTEGER);
+BEGIN code[cpos] := n MOD 256; INC(cpos)
+END Put1;
+
+PROCEDURE Put2(n: INTEGER);
+BEGIN
+	code[cpos] := n MOD 256; n := n DIV 256;
+	code[cpos+1] := n MOD 256; cpos := cpos + 2
+END Put2;
+
+PROCEDURE Put4(n: INTEGER);
+BEGIN
+	code[cpos] := n MOD 256; n := n DIV 256;
+	code[cpos+1] := n MOD 256; n := n DIV 256;
+	code[cpos+2] := n MOD 256; n := n DIV 256;
+	code[cpos+3] := n MOD 256; cpos := cpos + 4
+END Put4;
+
+PROCEDURE Put8(n: INTEGER);
+BEGIN
+	code[cpos] := n MOD 256; n := n DIV 256;
+	code[cpos+1] := n MOD 256; n := n DIV 256;
+	code[cpos+2] := n MOD 256; n := n DIV 256;
+	code[cpos+3] := n MOD 256; n := n DIV 256;
+	code[cpos+4] := n MOD 256; n := n DIV 256;
+	code[cpos+5] := n MOD 256; n := n DIV 256;
+	code[cpos+6] := n MOD 256; n := n DIV 256;
+	code[cpos+7] := n MOD 256; cpos := cpos + 8
+END Put8;
+	
+PROCEDURE EmitREX(reg, rsize: INTEGER);
+	CONST W = 8; R = 4; X = 2; B = 1;
+	VAR rex: INTEGER;
+BEGIN
+	rex := 40H;
+	IF rsize = 8 THEN rex := rex + W END;
+	IF reg >= reg_R8 THEN rex := rex + R END;
+	IF (mem.rm >= reg_R8)
+	OR (mem.mod # 3) & (mem.rm = reg_SP) & (mem.bas >= reg_R8)
+	THEN rex := rex + B
+	END;
+	IF (mem.mod # 3) & (mem.rm = reg_SP) & (mem.idx >= reg_R8)
+	THEN rex := rex + X
+	END;
+	IF (rex # 40H)
+	OR (rsize = 1)
+		& ((reg IN {reg_SP..reg_DI})
+		OR (mem.mod = 3) & (mem.rm IN {reg_SP..reg_DI}))
+	THEN Put1(rex)
+	END
+END EmitREX;
+
+PROCEDURE Emit16bitPrefix(rsize: INTEGER);
+BEGIN IF rsize = 2 THEN Put1(66H) END
+END Emit16bitPrefix;
+
+PROCEDURE HandleMultibytesOpcode(VAR op: INTEGER);
+BEGIN
+	IF op MOD 256 = 0FH THEN
+		Put1(0FH); op := op DIV 256;
+		IF (op MOD 256 = 38H) OR (op MOD 256 = 3AH) THEN
+			Put1(op); op := op DIV 256
+		END
+	END
+END HandleMultibytesOpcode;
+
+PROCEDURE EmitModRM(reg: INTEGER);
+BEGIN
+	Put1(mem.mod * 64 + reg MOD 8 * 8 + mem.rm MOD 8);
+	IF mem.mod # 3 THEN
+		IF mem.rm IN {reg_SP, reg_R12} THEN
+			Put1(mem.scl * 64 + mem.idx MOD 8 * 8 + mem.bas MOD 8)
+		END;
+		IF (mem.mod = 0) & (mem.rm IN {reg_BP, reg_R13})
+		OR (mem.mod = 2)
+		THEN Put4(mem.disp)
+		ELSIF mem.mod = 1 THEN Put1(mem.disp)
+		END
+	END
+END EmitModRM;
+
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE IntToSet(n: INTEGER): SET;
+	RETURN SYSTEM.VAL(SET, n)
+END IntToSet;
+	
+PROCEDURE EmitRegRm(op, reg, rsize: INTEGER);
+	CONST w = 1;
+	VAR org: INTEGER;
+BEGIN
+	Emit16bitPrefix(rsize); EmitREX(reg, rsize);
+	org := op; HandleMultibytesOpcode(op);
+	
+	IF (rsize > 1) & (org < LEA) THEN op := op + w END;
+	Put1(op); EmitModRM(reg)
+END EmitRegRm;
+
+PROCEDURE EmitRm (op, rsize: INTEGER);
+	CONST w = 1;
+	VAR op3bits, org: INTEGER;
+BEGIN
+	Emit16bitPrefix(rsize); EmitREX(0, rsize);
+	org := op; HandleMultibytesOpcode(op);
+	
+	op3bits := op DIV 256; op := op MOD 256;
+	IF (rsize > 1) & ~ODD(op) & (org # LDMXCSR) & (org # STMXCSR)
+	THEN op := op + w
+	END;
+	Put1(op); EmitModRM(op3bits)
+END EmitRm;
+
+PROCEDURE EmitRmImm (op, rsize, imm: INTEGER);
+	CONST w = 1; s = 2;
+	VAR op3bits: INTEGER;
+BEGIN
+	Emit16bitPrefix(rsize);
+	IF op MOD 256 # IMULi THEN EmitREX(0, rsize)
+	ELSE EmitREX(op DIV 256, rsize)
+	END;
+	HandleMultibytesOpcode(op);
+	
+	op3bits := op DIV 256; op := op MOD 256;
+	IF rsize > 1 THEN
+		IF (op = 0C0H) OR (op = 0BAH) THEN rsize := 1
+		ELSIF (imm >= -128) & (imm <= 127) & (op = 80H) THEN
+			op := op + s; rsize := 1
+		END;
+		IF ~ODD(op) & (op # 0BAH) THEN op := op + w END
+	END;
+	Put1(op); EmitModRM(op3bits);
+	
+	IF rsize = 1 THEN Put1(imm)
+	ELSIF rsize = 2 THEN Put2(imm) ELSE Put4(imm)
+	END
+END EmitRmImm;
+
+PROCEDURE EmitBare(op: INTEGER);
+BEGIN WHILE op > 0 DO Put1(op); op := op DIV 256 END
+END EmitBare;
+
+PROCEDURE EmitXmmRm(op, xreg, rsize: INTEGER);
+	VAR prefix: INTEGER;
+BEGIN
+	prefix := op MOD 256; op := op DIV 256;
+	IF prefix # 0 THEN Put1(prefix) END;
+	EmitREX(xreg, rsize); HandleMultibytesOpcode(op);
+	Put1(op MOD 256); EmitModRM(xreg)
+END EmitXmmRm;
+
+PROCEDURE EmitMOVZX(reg, rmsize: INTEGER);
+	VAR rsize, op: INTEGER;
+BEGIN rsize := 4; op := 0B6H;
+	IF rmsize = 1 THEN
+		IF (mem.mod = 3) & (mem.rm IN {reg_SP..reg_DI})
+		THEN rsize := 8
+		END
+	ELSIF rmsize = 2 THEN INC(op)
+	ELSE ASSERT(FALSE)
+	END;
+	EmitREX(reg, rsize); Put1(0FH); Put1(op); EmitModRM(reg)
+END EmitMOVZX;
+
+PROCEDURE EmitMOVSX(reg, rmsize: INTEGER);
+	VAR op: INTEGER;
+BEGIN
+	IF rmsize = 1 THEN op := 0BE0FH
+	ELSIF rmsize = 2 THEN op := 0BF0FH
+	ELSIF rmsize = 4 THEN op := 63H
+	ELSE ASSERT(FALSE)
+	END;
+	EmitREX(reg, 8); HandleMultibytesOpcode(op);
+	Put1(op); EmitModRM(reg)
+END EmitMOVSX;
+
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE SetRm_reg(reg: INTEGER);
+BEGIN mem.rm := reg; mem.mod := 3
+END SetRm_reg;
+
+PROCEDURE SetRm_regI(reg, disp: INTEGER);
+BEGIN
+	mem.rm := reg; mem.disp := disp;
+	IF (disp >= -128) & (disp <= 127) THEN
+		IF (disp = 0) & ~(reg IN {reg_BP, reg_R13}) THEN mem.mod := 0
+		ELSE mem.mod := 1
+		END
+	ELSE mem.mod := 2
+	END;
+	IF reg IN {reg_SP, reg_R12} THEN
+		mem.bas := reg_SP; mem.idx := reg_SP; mem.scl := 0
+	END
+END SetRm_regI;
+
+(*PROCEDURE SetRmOperand_staticvar (adr: INTEGER);
+BEGIN
+	Emit.mem.rm := reg_BP; Emit.mem.disp := adr + staticbase;
+	Emit.mem.mod := 0; metacode[pc].relfixup := TRUE
+END SetRmOperand_staticvar;
+
+PROCEDURE SetRmOperand (x : Base.Item);
+BEGIN
+	IF x.mode IN {Base.cVar, Base.cRef} THEN
+		Emit.mem.rm := reg_BP; Emit.mem.disp := x.a;
+		IF x.lev > 0 THEN
+			IF (x.a >= -128) & (x.a <= 127) THEN Emit.mem.mod := 1
+			ELSE Emit.mem.mod := 2
+			END
+		ELSE
+			Emit.mem.mod := 0; metacode[pc].relfixup := TRUE;
+			IF x.lev = 0 THEN Emit.mem.disp := Emit.mem.disp + varbase
+			ELSE Emit.mem.disp := Emit.mem.disp + staticbase
+			END
+		END
+	ELSIF x.mode = mRegI THEN SetRmOperand_regI (x.r, x.a)
+	ELSIF x.mode = mReg THEN SetRmOperand_reg (x.r)
+	ELSIF x.mode = Base.cProc THEN Emit.mem.rm := reg_BP; Emit.mem.disp := x.a;
+		Emit.mem.mod := 0; metacode[pc].relfixup := TRUE;
+		IF x.lev < 0 THEN Emit.mem.disp := Emit.mem.disp + staticbase END
+	END
+END SetRmOperand;*)
+
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE EmitRR(op, reg, rsize, rm: INTEGER);
+BEGIN SetRm_reg(rm); EmitRegRm(op, reg, rsize)
+END EmitRR;
+
+PROCEDURE EmitRI(op, rm, rsize, imm: INTEGER);
+BEGIN
+	SetRm_reg(rm); IF op = IMULi THEN op := op + rm * 256 END;
+	EmitRmImm(op, rsize, imm)
+END EmitRI;
+
+PROCEDURE EmitR(op, rm, rsize: INTEGER);
+BEGIN SetRm_reg(rm); EmitRm(op, rsize)
+END EmitR;
+
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE MoveRI(rm, rsize, imm: INTEGER);
+	CONST w = 8;
+	VAR op: INTEGER;
+BEGIN
+	SetRm_reg(rm); Emit16bitPrefix(rsize);
+	EmitREX(0, rsize); op := 0B0H + rm MOD 8;
+	IF rsize > 1 THEN op := op + w END; Put1(op);
+	IF rsize = 1 THEN Put1(imm) ELSIF rsize = 2 THEN Put2(imm)
+	ELSIF rsize = 4 THEN Put4(imm) ELSE Put8(imm)
+	END
+END MoveRI;
+
+PROCEDURE PushR(rm: INTEGER);
+BEGIN
+	SetRm_reg (rm); EmitREX(0, 4); Put1(50H + rm MOD 8); stack := stack + 8
+END PushR;
+
+PROCEDURE PopR(rm: INTEGER);
+BEGIN
+	SetRm_reg (rm); EmitREX(0, 4); Put1(58H + rm MOD 8); stack := stack - 8
+END PopR;
+
+PROCEDURE Branch(disp: INTEGER);
+BEGIN Put1(0E9H); Put4(disp)
+END Branch;
+
+PROCEDURE CallNear(disp: INTEGER);
+BEGIN Put1(0E8H); Put4(disp)
+END CallNear;
+
+PROCEDURE CondBranch(cond, disp: INTEGER);
+BEGIN Put1(0FH); Put1(80H + cond); Put4(disp)
+END CondBranch;
+
+PROCEDURE SetccRm(cond: INTEGER);
+BEGIN EmitREX(0, 1); Put1(0FH); Put1(90H + cond); EmitModRM(0)
+END SetccRm;
+
+PROCEDURE EmitRep(op, rsize, z: INTEGER);
+	CONST w = 1;
+BEGIN
+	Put1(0F2H + z); (* REP prefix *)
+	Emit16bitPrefix(rsize); EmitREX(0, rsize);
+	IF (rsize > 1) & ~ODD(op) THEN op := op + w END;
+	Put1(op)
+END EmitRep;
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -67,8 +422,8 @@ BEGIN
 	IF x.type = B.byteType THEN x.type := B.intType END;
 	IF x.type = B.intType THEN x.val := -x.val
 	ELSIF x.type = B.realType THEN
-		x.val := SYS.VAL(INTEGER, -SYS.VAL(REAL, x.val))
-	ELSIF x.type = B.setType THEN x.val := ORD(-SYS.VAL(SET, x.val))
+		x.val := SYSTEM.VAL(INTEGER, -SYSTEM.VAL(REAL, x.val))
+	ELSIF x.type = B.setType THEN x.val := ORD(-SYSTEM.VAL(SET, x.val))
 	ELSIF x.type = B.boolType THEN x.val := (x.val + 1) MOD 2
 	END;
 	RETURN x
@@ -84,12 +439,12 @@ BEGIN
 			IF (op = S.eql) & (xval = yval) OR (op = S.neq) & (xval # yval)
 			OR (op = S.gtr) & (xval > yval) OR (op = S.geq) & (xval >= yval)
 			OR (op = S.lss) & (xval < yval) OR (op = S.leq) & (xval <= yval)
-			OR (op = S.in) & (xval IN SYS.VAL(SET,yval))
+			OR (op = S.in) & (xval IN SYSTEM.VAL(SET,yval))
 			THEN val := 1 ELSE val := 0
 			END
 		ELSIF (x IS B.Const) & (y IS B.Const) & (x.type = B.realType) THEN
 			xval := x(B.Const).val; yval := y(B.Const).val;
-			r1 := SYS.VAL(REAL, xval); r2 := SYS.VAL(REAL, yval);
+			r1 := SYSTEM.VAL(REAL, xval); r2 := SYSTEM.VAL(REAL, yval);
 			IF (op = S.eql) & (r1 = r2) OR (op = S.neq) & (r1 # r2)
 			OR (op = S.gtr) & (r1 > r2) OR (op = S.geq) & (r1 >= r2)
 			OR (op = S.lss) & (r1 < r2) OR (op = S.leq) & (r1 <= r2)
@@ -131,22 +486,22 @@ BEGIN
 			END
 		ELSIF x.type = B.setType THEN type := B.setType;
 			IF op = S.plus THEN
-				val := ORD(SYS.VAL(SET, xval) + SYS.VAL(SET, yval))
+				val := ORD(SYSTEM.VAL(SET, xval) + SYSTEM.VAL(SET, yval))
 			ELSIF op = S.minus THEN
-				val := ORD(SYS.VAL(SET, xval) - SYS.VAL(SET, yval))
+				val := ORD(SYSTEM.VAL(SET, xval) - SYSTEM.VAL(SET, yval))
 			ELSIF op = S.times THEN
-				val := ORD(SYS.VAL(SET, xval) * SYS.VAL(SET, yval))
+				val := ORD(SYSTEM.VAL(SET, xval) * SYSTEM.VAL(SET, yval))
 			ELSIF op = S.rdiv THEN
-				val := ORD(SYS.VAL(SET, xval) / SYS.VAL(SET, yval))
+				val := ORD(SYSTEM.VAL(SET, xval) / SYSTEM.VAL(SET, yval))
 			END
 		ELSIF x.type = B.realType THEN type := B.realType;
-			r1 := SYS.VAL(REAL, xval); r2 := SYS.VAL(REAL, yval);
-			IF op = S.plus THEN val := SYS.VAL(INTEGER, r1 + r2)
-			ELSIF op = S.minus THEN val := SYS.VAL(INTEGER, r1 - r2)
-			ELSIF op = S.times THEN val := SYS.VAL(INTEGER, r1 * r2)
+			r1 := SYSTEM.VAL(REAL, xval); r2 := SYSTEM.VAL(REAL, yval);
+			IF op = S.plus THEN val := SYSTEM.VAL(INTEGER, r1 + r2)
+			ELSIF op = S.minus THEN val := SYSTEM.VAL(INTEGER, r1 - r2)
+			ELSIF op = S.times THEN val := SYSTEM.VAL(INTEGER, r1 * r2)
 			ELSIF op = S.rdiv THEN
 				IF (r2 # 0.0) & (r2 # -0.0) THEN
-					val := SYS.VAL(INTEGER, r1 / r2)
+					val := SYSTEM.VAL(INTEGER, r1 / r2)
 				ELSE S.Mark('division by zero')
 				END
 			END
@@ -164,9 +519,47 @@ END FoldConst;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
+(* Set size, alignment, etc. for all types and variables *)
 
-PROCEDURE Generate*(modid: B.IdStr; modinit: B.Node);
+PROCEDURE CalculateSize;
+	VAR ident: B.Ident; x: B.Object;
+		size: INTEGER;
 BEGIN
+	ident := B.universe.first;
+	WHILE ident # NIL DO x := ident.obj;
+		IF x IS B.Str THEN
+			x(B.Str).adr := staticSize; size := x(B.Str).len * 2;
+			IF staticSize + size > MaxSize THEN
+				S.Mark('Data size limit reached')
+			ELSE staticSize := staticSize + size
+			END
+		ELSIF x.class = B.cType THEN CalculateType(x.type)
+		ELSIF x IS B.Var THEN
+			x(B.Var).adr := staticSize; 
+		END;
+		ident := ident.next
+	END
+END CalculateSize;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE Generate*(modinit: B.Node);
+BEGIN
+	CalculateSize;
+	IF 
 END Generate;
+
+PROCEDURE Init*(modid: B.IdStr);
+BEGIN
+	bssSize := 0; staticSize := 0;
+	B.intType.size := 8; B.intType.align := 8;
+	B.byteType.size := 1; B.byteType.align := 1;
+	B.charType.size := 2; B.charType.align := 2;
+	B.boolType.size := 1; B.boolType.align := 1;
+	B.setType.size := 8; B.setType.align := 8;
+	B.realType.size := 8; B.realType.align := 8;
+	B.nilType.size := 8; B.nilType.align := 8
+END Init;
 
 END Generator1.

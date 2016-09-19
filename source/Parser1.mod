@@ -1106,7 +1106,7 @@ PROCEDURE Module*;
 BEGIN
 	GetSym; modid := '_dummy';
 	IF sym = S.ident THEN modid := S.id; GetSym ELSE Missing(S.ident) END;
-	Check0(S.semicolon); B.Init(modid);
+	Check0(S.semicolon); B.Init(modid); G.Init(modid);
 	IF sym = S.import THEN ImportList END;
 	
 	IF S.errcnt = 0 THEN

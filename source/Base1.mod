@@ -64,7 +64,8 @@ TYPE
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
 	
 	NodeDesc* = EXTENSIBLE RECORD (ObjDesc)
-		op*: INTEGER; left*, right*: Object; ronly*: BOOLEAN
+		op*: INTEGER; left*, right*: Object; ronly*: BOOLEAN;
+		codeAdr*, codeSize*: INTEGER (* for Generator *)
 	END;
 	
 	TypeDesc* = RECORD
@@ -76,7 +77,7 @@ TYPE
 
 VAR
 	(* Predefined Types *)
-	intType*, byteType*, realType*, longrealType*: Type;
+	intType*, byteType*, realType*: Type;
 	boolType*, setType*, charType*, nilType*, strType*: Type;
 	noType*: Type; predefinedTypes: ARRAY 32 OF Type;
 	
@@ -341,13 +342,11 @@ BEGIN
 		DetectType(typ.base);
 		fld := typ.fields;
 		WHILE fld # NIL DO
-			IF fld.export OR (fld.obj.type.nptr > 0) THEN
-				WriteInt(symfile, cField);
-				IF ~fld.export THEN s[0] := 0X; Sys.WriteStr(symfile, s)
-				ELSE Sys.WriteStr(symfile, fld.name)
-				END;
-				DetectType(fld.obj.type)
+			WriteInt(symfile, cField);
+			IF ~fld.export THEN s[0] := 0X; Sys.WriteStr(symfile, s)
+			ELSE Sys.WriteStr(symfile, fld.name)
 			END;
+			DetectType(fld.obj.type);
 			fld := fld.next
 		END;
 		WriteInt (symfile, cType)
@@ -693,7 +692,6 @@ BEGIN
 	NewPredefinedType(charType, tChar);
 	NewPredefinedType(nilType, tNil);
 	NewPredefinedType(realType, tReal);
-	NewPredefinedType(longrealType, tReal);
 	NewPredefinedType(strType, tStr);
 	NewPredefinedType(noType, tNull)
 END Base1.
