@@ -565,9 +565,19 @@ BEGIN
 END ReadModkey;
 
 PROCEDURE ImportModules*;
-	VAR ident: Ident; x: Object; cls, i, val, slen: INTEGER;
-		module: Module; name: IdStr; tp: Type; unusedmk: ModuleKey;
+	VAR ident: Ident; x: Object; cls, i, j, k, val, slen: INTEGER;
+		module, dep: Module; name, depname: IdStr; tp: Type;
+		depkey: ModuleKey; msg: String;
 BEGIN
+	(* Sort module list *)
+	FOR i := 0 TO modno-2 DO k := i;
+		FOR j := i+1 TO modno-1 DO
+			IF modList[k].lev > modList[j].lev THEN k := j END
+		END;
+		IF i # k THEN module := modList[i];
+			modList[i] := modList[k]; modList[k] := module
+		END
+	END;
 	FOR i := 0 TO modno-1 DO
 		module := modList[i]; Sys.Open(symfile, module.path);
 		ReadModkey(module.key); ReadInt(symfile, module.lev);
@@ -597,8 +607,18 @@ BEGIN
 				x := NewProc(); ReadInt(symfile, x(Proc).expno);
 				x(Proc).adr := 0; ImportProc(x.type, FALSE);
 				ident := NewImportIdent(ident, name, x)
-			ELSIF cls = cModule THEN (* ignore *)
-				Sys.ReadStr(symfile, name); ReadModkey(unusedmk)
+			ELSIF cls = cModule THEN
+				Sys.ReadStr(symfile, name); ReadModkey(depkey);
+				dep := FindModule(name);
+				IF name = modid THEN S.Mark('Circular dependency')
+				ELSIF dep # NIL THEN
+					IF (dep.key[0] # depkey[0]) OR (dep.key[1] # depkey[1])
+					THEN msg := 'Module '; AppendStr(name, msg);
+						AppendStr(' was imported by ', msg);
+						AppendStr(module.name, msg);
+						AppendStr(' with a different key', msg); S.Mark(msg)
+					END
+				END
 			END;
 			ReadInt(symfile, cls)
 		END;
@@ -608,8 +628,7 @@ BEGIN
 END ImportModules;
 
 PROCEDURE NewModule*(modident: Ident; modname: IdStr);
-	VAR path, msg: String; depmodname: IdStr; depmodkey: ModuleKey;
-		depmod, module: Module; cls: INTEGER;
+	VAR path: String; module: Module;
 BEGIN
 	path[0] := 0X; AppendStr(modname, path); AppendStr('.sym', path);
 	IF modname = 'SYSTEM' THEN
@@ -624,33 +643,13 @@ BEGIN
 		IF modident # NIL THEN
 			modident.obj := module; module.ident := modident
 		END;
-		modList[modno] := module; INC(modno);
-		Sys.Open(symfile, path);
-		ReadModkey(module.key);
-		ReadInt(symfile, module.lev);
-		ReadInt(symfile, cls);
-		WHILE cls = cModule DO
-			Sys.ReadStr(symfile, depmodname); ReadModkey(depmodkey);
-			depmod := FindModule(depmodname);
-			IF depmod # NIL THEN
-				IF (depmod.key[0] # depmodkey[0])
-				OR (depmod.key[1] # depmodkey[1]) THEN
-					msg := 'Module '; AppendStr(depmodname, msg);
-					AppendStr(' was imported by ', msg);
-					AppendStr(modname, msg);
-					AppendStr(' with a different key', msg); S.Mark(msg)
-				END;
-				IF module.lev <= depmod.lev THEN
-					module.lev := depmod.lev + 1;
-					IF module.lev > MaxModLev THEN
-						S.Mark('Module level too deep')
-					END
-				END
-			ELSIF depmodname = modid THEN S.Mark('Circular dependency')
-			END;
-			ReadInt(symfile, cls)
+		modList[modno] := module; INC(modno); Sys.Open(symfile, path);
+		ReadModkey(module.key); ReadInt(symfile, module.lev);
+		IF module.lev >= modlev THEN modlev := module.lev + 1;
+			IF modlev > MaxModLev THEN S.Mark('Module level too deep') END
 		END;
 		Sys.Close(symfile)
+	ELSE S.Mark('Symbol file not existed')
 	END;
 END NewModule;
 
