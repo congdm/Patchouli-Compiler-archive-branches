@@ -9,8 +9,8 @@ CONST
 	
 	(* Object class *)
 	cNull* = -1; cModule* = 0; cType* = 1;
-	cNode* = 2; cVar* = 3; cRef* = 4; cConst* = 5;
-	cProc* = 6; cField* = 8; cSProc* = 9; cSFunc* = 10;
+	cNode* = 2; cVar* = 3; cConst* = 4; cProc* = 5;
+	cField* = 6; cSProc* = 7; cSFunc* = 8;
 	
 	(* Type form *)
 	tInt* = 0; tBool* = 1; tSet* = 2; tChar* = 3; tReal* = 4;
@@ -30,7 +30,7 @@ TYPE
     Node* = POINTER TO NodeDesc;
     Ident* = POINTER TO IdentDesc;
 	
-	TypeList* = POINTER TO RECORD type: Type; next: TypeList END;
+	TypeList* = POINTER TO RECORD type*: Type; next*: TypeList END;
 	
 	ObjDesc* = EXTENSIBLE RECORD
 		class*: INTEGER; type*: Type; ident*: Ident
@@ -38,20 +38,19 @@ TYPE
 	Const* = POINTER TO EXTENSIBLE RECORD (ObjDesc) val*: INTEGER END;
 	Field* = POINTER TO EXTENSIBLE RECORD (ObjDesc) off*: INTEGER END;
 	Var* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
-		adr*, lev*: INTEGER; ronly*, par*: BOOLEAN
+		adr*, expno*, lev*: INTEGER; ronly*, par*, ref*: BOOLEAN
 	END;
 	Proc* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
-		adr*, lev*, locblksize*: INTEGER;
+		adr*, expno*, lev*, locblksize*: INTEGER;
         decl*: Ident; statseq*: Node; return*: Object
 	END;
 	Str* = POINTER TO EXTENSIBLE RECORD (Var)
 		bufpos*, len*: INTEGER
 	END;
 	Module* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
-		export*: BOOLEAN; path*: String;
-		name*: IdStr; key*: ModuleKey;
-		lev*: INTEGER; first*: Ident;
-		types*: TypeList
+		path*: String; name*: IdStr;
+		key*: ModuleKey; lev*, adr*: INTEGER;
+		first*: Ident; types*: TypeList
 	END;
 	SProc* = POINTER TO EXTENSIBLE RECORD (ObjDesc) id*: IdStr END;
 	
@@ -70,7 +69,8 @@ TYPE
 	
 	TypeDesc* = RECORD
 		form*, size*, align*, nptr*: INTEGER;
-		len*, lev*, adr*: INTEGER; base*: Type; fields*: Ident;
+		len*, adr*, lev*, expno*: INTEGER;
+		base*: Type; fields*: Ident;
 		parblksize*, nfpar*: INTEGER; obj*: Object;
 		mod*, ref*: INTEGER (* import/export *)
 	END;
@@ -83,10 +83,11 @@ VAR
 	
 	topScope*, universe*, systemScope: Scope;
 	curLev*, modlev*: INTEGER; modid*: IdStr; modkey*: ModuleKey;
+	expList*, strList*: Ident; recList*: TypeList;
 	
 	symfile: Sys.File;
-	refno, preTypeNo, expno, modno: INTEGER;
-	expList*: Ident; impTypes: ARRAY MaxExpTypes OF Type;
+	refno, preTypeNo, expno, modno*: INTEGER;
+	impTypes: ARRAY MaxExpTypes OF Type;
 	modList*: ARRAY MaxImpMod OF Module;
 	
 	strbuf*: ARRAY 100000H OF CHAR; strbufSize*: INTEGER;
@@ -134,27 +135,30 @@ END AppendStr;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
-	
+
 PROCEDURE NewVar*(tp: Type): Var;
 	VAR v: Var;
 BEGIN
-	NEW(v); v.class := cVar; v.type := tp; v.lev := curLev;
-	v.ronly := FALSE; v.par := FALSE;
+	NEW(v); v.class := cVar;
+	v.ronly := FALSE; v.par := FALSE; v.ref := FALSE;
+	v.type := tp; v.lev := curLev;
 	RETURN v
 END NewVar;
 
 PROCEDURE NewConst*(tp: Type; val: INTEGER): Const;
 	VAR c: Const;
 BEGIN
-	NEW(c); c.class := cConst; c.type := tp; c.val := val;
+	NEW(c); c.class := cConst;
+	c.type := tp; c.val := val;
 	RETURN c
 END NewConst;
 
-PROCEDURE NewPar*(proc, tp: Type; cls: INTEGER; ronly: BOOLEAN): Var;
+PROCEDURE NewPar*(proc, tp: Type; ref, ronly: BOOLEAN): Var;
 	VAR v: Var;
 BEGIN
-	NEW(v); v.class := cls; v.type := tp; v.lev := curLev;
-	v.ronly := ronly; v.par := TRUE;
+	NEW(v); v.class := cVar;
+	v.ronly := ronly; v.par := TRUE; v.ref := ref;
+	v.type := tp; v.lev := curLev;
 	INC(proc.nfpar);
 	RETURN v
 END NewPar;
@@ -162,21 +166,23 @@ END NewPar;
 PROCEDURE NewField*(rec, tp: Type): Field;
 	VAR fld: Field;
 BEGIN
-	NEW(fld); fld.class := cField; fld.type := tp;
-	rec.nptr := rec.nptr + tp.nptr;
+	NEW(fld); fld.class := cField;
+	fld.type := tp; rec.nptr := rec.nptr + tp.nptr;
 	RETURN fld
 END NewField;
 
 PROCEDURE NewStr*(str: String; slen: INTEGER): Str;
-	VAR x: Str; i: INTEGER;
+	VAR x: Str; i: INTEGER; p: Ident;
 BEGIN
-	NEW(x); x.class := cVar; x.type := strType; x.lev := curLev;
-	x.par := FALSE; x.ronly := TRUE; x.len := slen;
+	NEW(x); x.class := cVar;
+	x.type := strType; x.lev := curLev; x.len := slen;
+	x.par := FALSE; x.ronly := TRUE; x.ref := FALSE;
 	IF str[0] # 0X (* need alloc buffer *) THEN 
 		IF strbufSize + slen >= LEN(strbuf) THEN
 			S.Mark('too many strings'); x.bufpos := -1
 		ELSE x.bufpos := strbufSize; strbufSize := strbufSize + slen;
-			FOR i := 0 TO slen-1 DO strbuf[x.bufpos+i] := str[i] END
+			FOR i := 0 TO slen-1 DO strbuf[x.bufpos+i] := str[i] END;
+			NEW(p); p.obj := x; p.next := strList; strList := p
 		END
 	ELSE x.bufpos := -1
 	END;
@@ -193,8 +199,8 @@ END NewProc;
 PROCEDURE NewTypeObj*(tp: Type): Object;
 	VAR x: Object;
 BEGIN
-	NEW(x); x.class := cType; x.type := tp;
-	IF tp.obj = NIL THEN tp.obj := x END;
+	NEW(x); x.class := cType;
+	x.type := tp; IF tp.obj = NIL THEN tp.obj := x END;
 	RETURN x
 END NewTypeObj;
 
@@ -211,6 +217,7 @@ END NewSProc;
 PROCEDURE NewType*(VAR typ: Type; form: INTEGER);
 BEGIN
 	NEW(typ); typ.form := form; typ.nptr := 0;
+	typ.size := 0; typ.align := 0;
 	typ.mod := -1; typ.ref := -1
 END NewType;
 
@@ -228,9 +235,10 @@ BEGIN
 END CompleteArray;
 
 PROCEDURE NewRecord*(): Type;
-	VAR tp: Type;
+	VAR tp: Type; p: TypeList;
 BEGIN
 	NewType(tp, tRec); tp.len := 0; tp.lev := curLev;
+	NEW(p); p.type := tp; p.next := recList; recList := p;
 	RETURN tp
 END NewRecord;
 
@@ -314,11 +322,13 @@ END DetectType;
 PROCEDURE ExportProc(typ: Type);
 	VAR par: Ident; x: Var;
 BEGIN
+	WriteInt(symfile, typ.size); WriteInt(symfile, typ.align);
 	DetectType(typ.base); par := typ.fields;
 	WHILE par # NIL DO x := par.obj(Var);
 		WriteInt(symfile, x.class);
 		Sys.WriteStr(symfile, par.name);
 		WriteInt(symfile, ORD(x.ronly));
+		WriteInt(symfile, ORD(x.ref));
 		DetectType(x.type);
 		par := par.next
 	END;
@@ -339,8 +349,8 @@ BEGIN
 	END;
 	WriteInt(symfile, typ.form);
 	IF typ.form = tRec THEN
-		DetectType(typ.base);
-		fld := typ.fields;
+		WriteInt(symfile, typ.size); WriteInt(symfile, typ.align);
+		DetectType(typ.base); fld := typ.fields;
 		WHILE fld # NIL DO
 			WriteInt(symfile, cField);
 			IF ~fld.export THEN s[0] := 0X; Sys.WriteStr(symfile, s)
@@ -352,8 +362,10 @@ BEGIN
 		WriteInt (symfile, cType)
 	ELSIF typ.form = tArray THEN
 		WriteInt(symfile, typ.len);
+		WriteInt(symfile, typ.size); WriteInt(symfile, typ.align);
 		DetectType (typ.base)
 	ELSIF typ.form = tPtr THEN
+		WriteInt(symfile, typ.size); WriteInt(symfile, typ.align);
 		DetectType(typ.base)
 	ELSIF typ.form = tProc THEN
 		ExportProc(typ)
@@ -461,7 +473,7 @@ BEGIN
 END NewImportIdent;
 
 PROCEDURE DetectTypeI(VAR typ: Type);
-	VAR mod, ref, i: INTEGER; modname: IdStr;
+	VAR mod, ref, i: INTEGER; modname: IdStr; msg: String;
 		module: Module; p: TypeList;
 BEGIN
 	ReadInt(symfile, mod); ReadInt(symfile, ref);
@@ -475,8 +487,13 @@ BEGIN
 		END
 	ELSIF mod >= 0 THEN
 		Sys.ReadStr(symfile, modname); module := FindModule(modname);
-		p := module.types; WHILE ref > 0 DO DEC(ref); p := p.next END;
-		typ := p.type
+		IF module # NIL THEN
+			p := module.types; WHILE ref > 0 DO DEC(ref); p := p.next END;
+			typ := p.type
+		ELSE msg := 'Need to import '; AppendStr(modname, msg);
+			AppendStr(' in order to import ', msg); i := -(curLev+1);
+			AppendStr(modList[i].name, msg); S.Mark(msg)
+		END
 	END
 END DetectTypeI;
 
@@ -492,15 +509,16 @@ END AddToTypeList;
 
 PROCEDURE ImportProc(VAR typ: Type; isType: BOOLEAN);
 	VAR par: Ident; x: Var; xtype: Type;
-		cls, n: INTEGER; name: IdStr; ronly: BOOLEAN;
+		cls, n: INTEGER; name: IdStr; ronly, ref: BOOLEAN;
 BEGIN
 	typ := NewProcType(); IF isType THEN AddToTypeList(typ) END;
+	ReadInt(symfile, typ.size); ReadInt(symfile, typ.align);
 	DetectTypeI(typ.base); ReadInt(symfile, cls); OpenScope;
 	WHILE cls # cType DO
 		Sys.ReadStr(symfile, name);
 		ReadInt(symfile, n); ronly := n = ORD(TRUE);
-		DetectTypeI(xtype);
-		x := NewPar(typ, xtype, cls, ronly);
+		ReadInt(symfile, n); ref := n = ORD(TRUE);
+		DetectTypeI(xtype); x := NewPar(typ, xtype, ref, ronly);
 		par := NewImportIdent(par, name, x);
 		ReadInt(symfile, cls)
 	END;
@@ -515,8 +533,9 @@ BEGIN
 	ReadInt(symfile, form);
 	IF form = tRec THEN
 		typ := NewRecord(); AddToTypeList(typ);
-		typ.ref := ref; typ.mod := -(curLev+1);
-		typ.adr := exp; DetectTypeI(typ.base); ExtendRecord(typ);
+		typ.ref := ref; typ.mod := -(curLev+1); typ.expno := exp; typ.adr := 0;
+		ReadInt(symfile, typ.size); ReadInt(symfile, typ.align);
+		DetectTypeI(typ.base); ExtendRecord(typ);
 		ReadInt(symfile, cls); OpenScope;
 		WHILE cls # cType DO
 			Sys.ReadStr(symfile, name);
@@ -528,9 +547,12 @@ BEGIN
 		typ.fields := topScope.first; CloseScope
 	ELSIF form = tArray THEN
 		ReadInt(symfile, len); typ := NewArray(len); AddToTypeList(typ);
+		ReadInt(symfile, typ.size); ReadInt(symfile, typ.align);
 		DetectTypeI(typ.base); CompleteArray(typ)
 	ELSIF form = tPtr THEN
-		typ := NewPointer(); AddToTypeList(typ); DetectTypeI(typ.base)
+		typ := NewPointer(); AddToTypeList(typ);
+		ReadInt(symfile, typ.size); ReadInt(symfile, typ.align);
+		DetectTypeI(typ.base)
 	ELSIF form = tProc THEN
 		ImportProc(typ, TRUE)
 	END
@@ -567,11 +589,13 @@ BEGIN
 				ReadInt(symfile, val); DetectTypeI(tp);
 				IF tp # strType THEN x := NewVar(tp); x(Var).ronly := TRUE
 				ELSE ReadInt(symfile, slen); x := NewStr('', slen)
-				END; x(Var).adr := val;
+				END;
+				x(Var).expno := val; x(Var).adr := 0;
 				ident := NewImportIdent(ident, name, x)
 			ELSIF cls = cProc THEN
-				Sys.ReadStr(symfile, name); x := NewProc();
-				ReadInt(symfile, x(Proc).adr); ImportProc(x.type, FALSE); 
+				Sys.ReadStr(symfile, name);
+				x := NewProc(); ReadInt(symfile, x(Proc).expno);
+				x(Proc).adr := 0; ImportProc(x.type, FALSE);
 				ident := NewImportIdent(ident, name, x)
 			ELSIF cls = cModule THEN (* ignore *)
 				Sys.ReadStr(symfile, name); ReadModkey(unusedmk)
@@ -589,13 +613,13 @@ PROCEDURE NewModule*(modident: Ident; modname: IdStr);
 BEGIN
 	path[0] := 0X; AppendStr(modname, path); AppendStr('.sym', path);
 	IF modname = 'SYSTEM' THEN
-		NEW(module); module.export := FALSE; module.name := modname;
+		NEW(module); module.name := modname;
 		module.lev := -1; module.first := systemScope.first;
 		IF modident # NIL THEN
 			modident.obj := module; module.ident := modident
 		END
 	ELSIF Sys.Existed(path) THEN
-		NEW(module); module.export := FALSE; module.name := modname;
+		NEW(module); module.name := modname;
 		module.path := path; module.lev := 0;
 		IF modident # NIL THEN
 			modident.obj := module; module.ident := modident
@@ -623,9 +647,6 @@ BEGIN
 					END
 				END
 			ELSIF depmodname = modid THEN S.Mark('Circular dependency')
-			ELSE msg := 'Need to import '; AppendStr(depmodname, msg);
-				AppendStr(' in order to import ', msg);
-				AppendStr(modname, msg); S.Mark(msg)
 			END;
 			ReadInt(symfile, cls)
 		END;

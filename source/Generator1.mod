@@ -8,7 +8,8 @@ CONST
 	MaxInt = 9223372036854775807;
 	MinInt = -MaxInt-1;
 	
-	MaxSize = 80000000H; (* 2GB limit *)
+	MaxSize = 80000000H; (* 2 GB limit *)
+	MaxLocBlkSize = 100000H; (* 1 MB limit *)
 	
 	reg_A = 0; reg_C = 1; reg_D = 2; reg_B = 3;
 	reg_SP = 4; reg_BP = 5; reg_SI = 6; reg_DI = 7;
@@ -66,11 +67,14 @@ TYPE
 VAR
 	code: ARRAY 200000H OF BYTE; cpos: INTEGER;
 	procList, curProc: Proc;
-	
-	stack, bssSize, staticSize: INTEGER;
+
+	stack: INTEGER;
 	mem: RECORD
 		mod, rm, bas, idx, scl, disp: INTEGER
 	END;
+	
+	varSize, staticSize: INTEGER;
+	impList: B.Ident;
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -521,38 +525,114 @@ END FoldConst;
 (* -------------------------------------------------------------------------- *)
 (* Set size, alignment, etc. for all types and variables *)
 
-PROCEDURE CalculateSize;
-	VAR ident: B.Ident; x: B.Object;
-		size: INTEGER;
+PROCEDURE MarkSizeError;
+BEGIN S.Mark('Data size limit reached')
+END MarkSizeError;
+
+PROCEDURE SetTypeSize*(tp: B.Type);
+	VAR size, align, fAlign, fSize: INTEGER; ident: B.Ident;
+		ftype: B.Type;
 BEGIN
-	ident := B.universe.first;
-	WHILE ident # NIL DO x := ident.obj;
-		IF x IS B.Str THEN
-			x(B.Str).adr := staticSize; size := x(B.Str).len * 2;
-			IF staticSize + size > MaxSize THEN
-				S.Mark('Data size limit reached')
-			ELSE staticSize := staticSize + size
+	IF tp.size = 0 THEN
+		IF tp.form = B.tPtr THEN tp.size := 8; tp.align := 8
+		ELSIF tp.form = B.tProc THEN tp.size := 8; tp.align := 8;
+			ident := tp.fields; size := 0;
+			WHILE ident # NIL DO
+				ftype := ident.obj.type; ident.obj(B.Var).adr := size;
+				IF (ftype.form = B.tArray) & (ftype.len < 0)
+				OR (ftype.form = B.tRec) & (ident.obj(B.Var).ref)
+				THEN size := size + 16
+				ELSE size := size + 8
+				END;
+				ident := ident.next
+			END;
+			tp.parblksize := size
+		ELSIF (tp.form = B.tArray) & (tp.len >= 0) THEN
+			SetTypeSize(tp.base); tp.align := tp.base.align;
+			IF MaxSize DIV tp.len < tp.base.size THEN
+				MarkSizeError; tp.size := tp.align
+			ELSE tp.size := tp.base.size * tp.len
 			END
-		ELSIF x.class = B.cType THEN CalculateType(x.type)
-		ELSIF x IS B.Var THEN
-			x(B.Var).adr := staticSize; 
-		END;
-		ident := ident.next
+		ELSIF tp.form = B.tRec THEN
+			IF tp.base # NIL THEN SetTypeSize(tp.base);
+				size := tp.base.size; align := tp.base.align
+			ELSE size := 0; align := 0
+			END;
+			ident := tp.fields;
+			WHILE ident # NIL DO
+				SetTypeSize(ident.obj.type);
+				fAlign := ident.obj.type.align; fSize := ident.obj.type.size;
+				IF fAlign > align THEN align := fAlign END;
+				size := size + (-size) MOD fAlign;
+				IF MaxSize < size THEN MarkSizeError; size := align END;
+				ident.obj(B.Field).off := size; size := size + fSize;
+				ident := ident.next
+			END;
+			tp.size := size; tp.align := align
+		ELSE ASSERT(FALSE)
+		END
 	END
-END CalculateSize;
+END SetTypeSize;
+
+PROCEDURE SetGlobalVarSize*(x: B.Object);
+BEGIN
+	varSize := varSize + (-varSize) MOD x.type.align;
+	x(B.Var).adr := varSize; varSize := varSize + x.type.size;
+	IF varSize > MaxSize THEN varSize := 0; MarkSizeError END
+END SetGlobalVarSize;
+
+PROCEDURE SetProcVarSize*(proc: B.Proc; x: B.Object);
+	VAR size: INTEGER;
+BEGIN size := proc.locblksize;
+	size := size + (-size) MOD x.type.align + x.type.size;
+	x(B.Var).adr := -size; proc.locblksize := size;
+	IF size > MaxLocBlkSize THEN proc.locblksize := 0; MarkSizeError END
+END SetProcVarSize;
+
+PROCEDURE AllocImportModules*;
+	VAR i: INTEGER;
+BEGIN
+	FOR i := 0 TO B.modno-1 DO
+		B.modList[i].adr := staticSize; staticSize := staticSize + 8
+	END
+END AllocImportModules;
+
+PROCEDURE AllocImport*(x: B.Object);
+	VAR p: B.Ident;
+BEGIN NEW(p); p.obj := x; p.next := impList; impList := p;
+	IF x IS B.Var THEN x(B.Var).adr := staticSize
+	ELSIF x IS B.Proc THEN x(B.Proc).adr := staticSize
+	ELSIF x.class = B.cType THEN x.type.adr := staticSize
+	END;
+	staticSize := staticSize + 8
+END AllocImport;
+
+PROCEDURE AllocStaticData;
+	VAR p: B.Ident; q: B.TypeList; x: B.Object;
+BEGIN p := B.strList;
+	WHILE p # NIL DO x := p.obj; x(B.Var).adr := staticSize;
+		staticSize := staticSize + 2*x(B.Str).len; p := p.next
+	END;
+	staticSize := staticSize + (-staticSize) MOD 8;
+	q := B.recList;
+	WHILE q # NIL DO q.type.adr := staticSize;
+		staticSize := staticSize + 24 + 8 * (B.MaxExt + q.type.nptr);
+		q := q.next
+	END
+END AllocStaticData;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
 PROCEDURE Generate*(modinit: B.Node);
 BEGIN
-	CalculateSize;
-	IF 
+	AllocStaticData; 
 END Generate;
 
 PROCEDURE Init*(modid: B.IdStr);
 BEGIN
-	bssSize := 0; staticSize := 0;
+	varSize := 0; staticSize := 64;
+	impList := NIL; procList := NIL; curProc := NIL;
 	B.intType.size := 8; B.intType.align := 8;
 	B.byteType.size := 1; B.byteType.align := 1;
 	B.charType.size := 2; B.charType.align := 2;

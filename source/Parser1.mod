@@ -76,7 +76,7 @@ BEGIN
 END IsExt;
 
 PROCEDURE IsVarPar(x: B.Object): BOOLEAN;
-	RETURN (x IS B.Var) & x(B.Var).par & (x.class = B.cRef)
+	RETURN (x.class = B.cVar) & x(B.Var).par & x(B.Var).ref
 END IsVarPar;
 
 PROCEDURE IsConst(x: B.Object): BOOLEAN;
@@ -90,7 +90,7 @@ END IsOpenArray;
 PROCEDURE SamePars(p1, p2: B.Ident): BOOLEAN;
 	RETURN (p1 = NIL) & (p2 = NIL)
 	OR (p1 # NIL) & (p2 # NIL)
-		& (p1.obj.class = p2.obj.class)
+		& (p1.obj(B.Var).ref = p2.obj(B.Var).ref)
 		& (p1.obj(B.Var).ronly = p2.obj(B.Var).ronly)
 		& ((p1.obj.type = p2.obj.type)
 			OR (p1.obj.type.form = B.tArray) & (p2.obj.type.form = B.tArray)
@@ -145,7 +145,7 @@ END TypeTestable;
 
 PROCEDURE CheckVar(x: B.Object; ronly: BOOLEAN);
 BEGIN
-	IF (x.class = B.cVar) OR (x.class = B.cRef) THEN
+	IF x.class = B.cVar THEN
 		IF ~ronly & x(B.Var).ronly THEN Mark('read only') END
 	ELSIF (x.class = B.cNode) & (x(B.Node).op = S.designator) THEN
 		IF ~ronly & x(B.Node).ronly THEN Mark('read only') END
@@ -156,9 +156,9 @@ END CheckVar;
 PROCEDURE CheckPar(fpar: B.Var; x: B.Object);
 	VAR xtype, ftype: B.Type; xform, fform: INTEGER;
 BEGIN xtype := x.type; ftype := fpar.type;
-	IF fpar.class = B.cVar THEN
+	IF ~fpar.ref THEN
 		IF ~CompTypes(ftype, xtype) THEN Mark('invalid type') END
-	ELSIF fpar.class = B.cRef THEN
+	ELSIF fpar.ref THEN
 		CheckVar(x, fpar.ronly); xform := xtype.form; fform := ftype.form;
 		IF (xtype = ftype)
 		OR (fform = B.tRec) & (xform = B.tRec) & IsExt(xtype, ftype)
@@ -221,12 +221,53 @@ PROCEDURE NewDesignator(x: B.Object): B.Node;
 	VAR designator: B.Node;
 BEGIN
 	designator := NewNode(S.designator, x, NIL); designator.type := x.type;
-	IF x IS B.Var THEN designator.ronly := x(B.Var).ronly END;
+	IF x.class = B.cVar THEN designator.ronly := x(B.Var).ronly END;
 	RETURN designator
 END NewDesignator;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
+
+PROCEDURE FindIdent(): B.Object;
+	VAR x: B.Object; ident: B.Ident; found: BOOLEAN;
+BEGIN ident := B.topScope.first; found := FALSE;
+	WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
+	IF ident # NIL THEN x := ident.obj; found := TRUE
+	ELSIF (curProcIdent # NIL) & (S.id = curProcIdent.name) THEN
+		x := curProcIdent.obj; found := TRUE
+	ELSE ident := B.universe.first;
+		WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
+		IF ident # NIL THEN x := ident.obj; found := TRUE
+		ELSE Mark('identifier not found')
+		END
+	END;
+	IF found & (x = NIL) THEN Mark('identifier undefined') END;
+	RETURN x
+END FindIdent;
+
+PROCEDURE qualident(): B.Object;
+	VAR x: B.Object; ident: B.Ident;
+BEGIN x := FindIdent(); GetSym;
+	IF (x # NIL) & (x IS B.Module) & (sym = S.period) THEN GetSym;
+		IF sym = S.ident THEN
+			ident := x(B.Module).first;
+			WHILE (ident # NIL) & (ident.name # S.id) DO
+				ident := ident.next
+			END;
+			IF ident # NIL THEN x := ident.obj;
+				IF (x IS B.Var) & (x(B.Var).lev < 0) & (x(B.Var).adr = 0)
+				OR (x IS B.Proc) & (x(B.Proc).lev < 0) & (x(B.Proc).adr = 0)
+				OR (x.class = B.cType) & (x.type.lev < 0) & (x.type.adr = 0)
+				THEN G.AllocImport(x)
+				END
+			ELSE Mark('not found'); x := NIL
+			END; GetSym
+		ELSE Missing(S.ident); x := NIL
+		END
+	ELSIF (x # NIL) & (x IS B.Module) THEN x := NIL
+	END;
+	RETURN x
+END qualident;
 
 PROCEDURE Call(x: B.Object): B.Node;
 	VAR call, last: B.Node; proc: B.Type;
@@ -261,42 +302,6 @@ BEGIN (* Call *)
 	END;
 	RETURN call
 END Call;
-
-PROCEDURE FindIdent(): B.Object;
-	VAR x: B.Object; ident: B.Ident; found: BOOLEAN;
-BEGIN ident := B.topScope.first; found := FALSE;
-	WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
-	IF ident # NIL THEN x := ident.obj; found := TRUE
-	ELSIF (curProcIdent # NIL) & (S.id = curProcIdent.name) THEN
-		x := curProcIdent.obj; found := TRUE
-	ELSE ident := B.universe.first;
-		WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
-		IF ident # NIL THEN x := ident.obj; found := TRUE
-		ELSE Mark('identifier not found')
-		END
-	END;
-	IF found & (x = NIL) THEN Mark('identifier undefined') END;
-	RETURN x
-END FindIdent;
-
-PROCEDURE qualident(): B.Object;
-	VAR x: B.Object; ident: B.Ident;
-BEGIN x := FindIdent(); GetSym;
-	IF (x # NIL) & (x IS B.Module) & (sym = S.period) THEN GetSym;
-		IF sym = S.ident THEN
-			ident := x(B.Module).first;
-			WHILE (ident # NIL) & (ident.name # S.id) DO
-				ident := ident.next
-			END;
-			IF ident # NIL THEN x := ident.obj
-			ELSE Mark('not found'); x := NIL
-			END; GetSym
-		ELSE Missing(S.ident); x := NIL
-		END
-	ELSIF (x # NIL) & (x IS B.Module) THEN x := NIL
-	END;
-	RETURN x
-END qualident;
 
 PROCEDURE designator(): B.Object;
 	VAR x, y: B.Object; fid: B.IdStr; fld: B.Ident;
@@ -587,7 +592,7 @@ END ConstExpression;
 (* -------------------------------------------------------------------------- *)
 
 PROCEDURE StdProc(f: B.SProc): B.Node;
-	VAR x, par, par2: B.Node; y: B.Object;
+	VAR x, par, par2: B.Node; y, t: B.Object;
 BEGIN
 	Check0(S.lparen); x := NewNode(S.sproc, f, NIL);
 	IF (f.id = 'INC') OR (f.id = 'DEC') THEN
@@ -606,6 +611,11 @@ BEGIN
 		END
 	ELSIF f.id = 'NEW' THEN
 		y := designator(); Check1(y, {B.tPtr}); CheckVar(y, FALSE);
+		IF (y.type.lev < 0) & (y.type.base.adr = 0) THEN
+			IF y.type.base.obj # NIL THEN G.AllocImport(y.type.base.obj)
+			ELSE t := B.NewTypeObj(y.type.base); G.AllocImport(t)
+			END
+		END;
 		par := NewNode(S.par, y, NIL); x.right := par
 	ELSIF f.id = 'ASSERT' THEN
 		y := expression(); CheckBool(y);
@@ -731,7 +741,7 @@ PROCEDURE Case(): B.Node;
 BEGIN (* Case *)
 	case := NewNode(S.case, NIL, NIL);
 	GetSym; x := expression(); case.left := x;
-	IF TypeTestable(x) & (x IS B.Var) THEN (*valid*)
+	IF TypeTestable(x) & (x.class = B.cVar) THEN (*valid*)
 	ELSE Mark('invalid case expression')
 	END;
 	Check0(S.of);
@@ -824,10 +834,10 @@ BEGIN tp := B.intType;
 END FormalType;
 
 PROCEDURE FPSection(proc: B.Type);
-	VAR ronly: BOOLEAN; cls: INTEGER;
+	VAR ronly, ref: BOOLEAN;
 		first, ident: B.Ident; tp: B.Type;
-BEGIN
-	IF sym = S.var THEN cls := B.cRef; GetSym ELSE cls := B.cVar END;
+BEGIN ref := FALSE;
+	IF sym = S.var THEN ref := TRUE; GetSym END;
 	IF sym = S.ident THEN
 		first := NewIdent(S.id); GetSym;
 		WHILE sym = S.comma DO GetSym;
@@ -840,9 +850,9 @@ BEGIN
 	ELSE Mark('No params?')
 	END;
 	Check0(S.colon); tp := FormalType(); ident := first;
-	ronly := (cls = B.cVar) & (tp.form IN {B.tArray, B.tRec});
+	ronly := ~ref & (tp.form IN {B.tArray, B.tRec});
 	WHILE ident # NIL DO
-		ident.obj := B.NewPar(proc, tp, cls, ronly);
+		ident.obj := B.NewPar(proc, tp, ref, ronly);
 		ident.obj.ident := ident; ident := ident.next
 	END
 END FPSection;
@@ -884,15 +894,14 @@ BEGIN
 				ptrType.base := x.type
 			ELSE Mark('not record type')
 			END
-		ELSIF B.curLev = 0 THEN
-			NEW(undef); undef.tp := ptrType; undef.name := S.id;
+		ELSE NEW(undef); undef.tp := ptrType; undef.name := S.id;
 			undef.next := undefList; undefList := undef
-		ELSE Mark('not found, must be global type')
 		END;
 		GetSym
 	ELSIF sym = S.record THEN ptrType.base := type0()
 	ELSE Mark('base type?')
 	END;
+	G.SetTypeSize(ptrType);
 	RETURN ptrType
 END PointerType;
 
@@ -984,10 +993,11 @@ BEGIN tp := B.intType;
 		IF sym = S.lparen THEN FormalParameters(tp) END
 	ELSE Mark('no type?')
 	END;
+	G.SetTypeSize(tp);
 	RETURN tp
 END type;
 
-PROCEDURE DeclarationSequence;
+PROCEDURE DeclarationSequence(parentProc: B.Proc);
 	VAR first, ident, par: B.Ident; x: B.Object; tp: B.Type;
 		proc: B.Proc; varobj: B.Var; statseq: B.Node;
 		undef, prev: UndefPtrList;
@@ -1012,7 +1022,7 @@ BEGIN
 				tp := PointerType(x); IF tp.obj = NIL THEN tp.obj := x END
 			END;
 			Check0(S.semicolon);
-			IF (B.curLev = 0) & (ident # NIL) & (x.type.form = B.tRec) THEN
+			IF (ident # NIL) & (x.type.form = B.tRec) THEN
 				undef := undefList; prev := NIL;
 				WHILE (undef # NIL) & (undef.name # ident.name) DO
 					prev := undef; undef := undef.next
@@ -1039,6 +1049,9 @@ BEGIN
 			Check0(S.colon); tp := type(); ident := first;
 			WHILE ident # NIL DO
 				x := B.NewVar(tp); ident.obj := x; x.ident := ident;
+				IF proc = NIL THEN G.SetGlobalVarSize(x)
+				ELSE G.SetProcVarSize(parentProc, x)
+				END;
 				ident := ident.next
 			END;
 			Check0(S.semicolon)
@@ -1049,14 +1062,15 @@ BEGIN
 			GetSym; CheckExport(curProcIdent)
 		ELSE curProcIdent := NIL; Mark('proc name?')
 		END;
-		proc := B.NewProc(); tp := B.NewProcType(); proc.type := tp;
+		proc := B.NewProc(); tp := B.NewProcType();
+		G.SetTypeSize(tp); proc.type := tp;
 		IF sym = S.lparen THEN FormalParameters(tp) END; Check0(S.semicolon);
 		B.OpenScope; B.IncLev(1); par := tp.fields;
 		WHILE par # NIL DO
 			ident := NewIdent(par.name); NEW(varobj); ident.obj := varobj;
 			varobj^ := par.obj(B.Var)^; par := par.next
 		END;
-		ident := curProcIdent; DeclarationSequence();
+		ident := curProcIdent; DeclarationSequence(proc);
 		curProcIdent := ident; proc.decl := B.topScope.first;
 		IF curProcIdent # NIL THEN
 			curProcIdent.obj := proc; proc.ident := curProcIdent
@@ -1098,19 +1112,19 @@ BEGIN GetSym;
 		IF sym = S.ident THEN import ELSE Missing(S.ident) END
 	END;
 	Check0(S.semicolon);
-	IF S.errcnt = 0 THEN B.ImportModules END
+	IF S.errcnt = 0 THEN B.ImportModules; G.AllocImportModules END
 END ImportList;
 
 PROCEDURE Module*;
 	VAR modid: B.IdStr; modinit: B.Node;
 BEGIN
-	GetSym; modid := '_dummy';
+	GetSym; modid[0] := 0X;
 	IF sym = S.ident THEN modid := S.id; GetSym ELSE Missing(S.ident) END;
 	Check0(S.semicolon); B.Init(modid); G.Init(modid);
 	IF sym = S.import THEN ImportList END;
 	
 	IF S.errcnt = 0 THEN
-		DeclarationSequence;
+		DeclarationSequence(NIL);
 		IF sym = S.begin THEN GetSym; modinit := StatementSequence() END;
 		Check0(S.end);
 		IF sym = S.ident THEN
