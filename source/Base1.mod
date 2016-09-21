@@ -63,8 +63,7 @@ TYPE
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
 	
 	NodeDesc* = EXTENSIBLE RECORD (ObjDesc)
-		op*: INTEGER; left*, right*: Object; ronly*: BOOLEAN;
-		codeAdr*, codeSize*: INTEGER (* for Generator *)
+		op*: INTEGER; left*, right*: Object; ronly*: BOOLEAN
 	END;
 	
 	TypeDesc* = RECORD
@@ -72,7 +71,7 @@ TYPE
 		len*, adr*, lev*, expno*: INTEGER;
 		base*: Type; fields*: Ident;
 		parblksize*, nfpar*: INTEGER; obj*: Object;
-		mod*, ref*: INTEGER (* import/export *)
+		ref*: INTEGER (* import/export *)
 	END;
 
 VAR
@@ -175,8 +174,8 @@ PROCEDURE NewStr*(str: String; slen: INTEGER): Str;
 	VAR x: Str; i: INTEGER; p: Ident;
 BEGIN
 	NEW(x); x.class := cVar;
-	x.type := strType; x.lev := curLev; x.len := slen;
 	x.par := FALSE; x.ronly := TRUE; x.ref := FALSE;
+	x.type := strType; x.lev := curLev; x.len := slen;
 	IF str[0] # 0X (* need alloc buffer *) THEN 
 		IF strbufSize + slen >= LEN(strbuf) THEN
 			S.Mark('too many strings'); x.bufpos := -1
@@ -207,7 +206,8 @@ END NewTypeObj;
 PROCEDURE NewSProc*(name: IdStr; cls: INTEGER): SProc;
 	VAR x: SProc;
 BEGIN
-	NEW(x); x.id := name; x.class := cls; x.type := noType;
+	NEW(x); x.class := cls;
+	x.id := name; x.type := noType;
 	RETURN x
 END NewSProc;
 
@@ -218,7 +218,7 @@ PROCEDURE NewType*(VAR typ: Type; form: INTEGER);
 BEGIN
 	NEW(typ); typ.form := form; typ.nptr := 0;
 	typ.size := 0; typ.align := 0;
-	typ.mod := -1; typ.ref := -1
+	typ.lev := curLev; typ.ref := -1
 END NewType;
 
 PROCEDURE NewArray*(len: INTEGER): Type;
@@ -237,7 +237,7 @@ END CompleteArray;
 PROCEDURE NewRecord*(): Type;
 	VAR tp: Type; p: TypeList;
 BEGIN
-	NewType(tp, tRec); tp.len := 0; tp.lev := curLev;
+	NewType(tp, tRec); tp.len := 0;
 	NEW(p); p.type := tp; p.next := recList; recList := p;
 	RETURN tp
 END NewRecord;
@@ -266,8 +266,7 @@ END NewProcType;
 
 PROCEDURE NewPredefinedType(VAR typ: Type; form: INTEGER);
 BEGIN
-	NewType(typ, form); INC(preTypeNo);
-	typ.mod := -2; typ.ref := preTypeNo;
+	NewType(typ, form); INC(preTypeNo); typ.ref := preTypeNo;
 	predefinedTypes[preTypeNo] := typ
 END NewPredefinedType;
 
@@ -312,10 +311,12 @@ END NewExport;
 PROCEDURE DetectType(typ: Type);
 BEGIN
 	IF typ # NIL THEN
-		WriteInt(symfile, typ.mod); WriteInt(symfile, typ.ref);
-		IF typ.mod >= 0 THEN Sys.WriteStr(symfile, modList[typ.mod].name) END;
-		IF (typ.mod = -1) & (typ.ref < 0) THEN ExportType0(typ) END
-	ELSE WriteInt(symfile, -2); WriteInt(symfile, 0)
+		WriteInt(symfile, typ.lev); WriteInt(symfile, typ.ref);
+		IF typ.lev < -1 THEN Sys.WriteStr(symfile, modList[-typ.lev-2].name)
+		ELSIF typ.lev = 0 THEN IF typ.ref < 0 THEN ExportType0(typ) END
+		ELSE ASSERT(typ.lev = -1)
+		END
+	ELSE WriteInt(symfile, -1); WriteInt(symfile, 0)
 	END
 END DetectType;
 
@@ -342,7 +343,7 @@ BEGIN
 	ELSE S.Mark('Too many exported types')
 	END;
 	WriteInt(symfile, typ.ref);
-	IF (typ.form = tRec) & (typ.lev = 0) THEN 
+	IF typ.form = tRec THEN 
 		NewExport(ident); NEW(ident.obj); ident.obj.class := cType;
 		ident.obj.type := typ; WriteInt(symfile, expno)
 	ELSE WriteInt(symfile, 0)
@@ -477,29 +478,30 @@ PROCEDURE DetectTypeI(VAR typ: Type);
 		module: Module; p: TypeList;
 BEGIN
 	ReadInt(symfile, mod); ReadInt(symfile, ref);
-	IF mod = -2 THEN typ := predefinedTypes[ref]
-	ELSIF mod = -1 THEN
+	IF mod = -1 THEN typ := predefinedTypes[ref]
+	ELSIF mod = 0 THEN
 		IF ref >= 0 THEN
-			i := -(curLev+1); p := modList[i].types;
+			i := -(curLev+2); p := modList[i].types;
 			WHILE ref > 0 DO DEC(ref); p := p.next END;
 			typ := p.type
 		ELSE ImportType0(typ)
 		END
-	ELSIF mod >= 0 THEN
+	ELSIF mod < -1 THEN
 		Sys.ReadStr(symfile, modname); module := FindModule(modname);
 		IF module # NIL THEN
 			p := module.types; WHILE ref > 0 DO DEC(ref); p := p.next END;
 			typ := p.type
 		ELSE msg := 'Need to import '; AppendStr(modname, msg);
-			AppendStr(' in order to import ', msg); i := -(curLev+1);
+			AppendStr(' in order to import ', msg); i := -(curLev+2);
 			AppendStr(modList[i].name, msg); S.Mark(msg)
 		END
+	ELSE ASSERT(FALSE)
 	END
 END DetectTypeI;
 
 PROCEDURE AddToTypeList(typ: Type);
 	VAR i: INTEGER; p: TypeList;
-BEGIN i := -(curLev+1);
+BEGIN i := -(curLev+2);
 	IF modList[i].types # NIL THEN p := modList[i].types;
 		WHILE p.next # NIL DO p := p.next END;
 		NEW(p.next); p := p.next; p.type := typ
@@ -533,7 +535,7 @@ BEGIN
 	ReadInt(symfile, form);
 	IF form = tRec THEN
 		typ := NewRecord(); AddToTypeList(typ);
-		typ.ref := ref; typ.mod := -(curLev+1); typ.expno := exp; typ.adr := 0;
+		typ.ref := ref; typ.expno := exp; typ.adr := 0;
 		ReadInt(symfile, typ.size); ReadInt(symfile, typ.align);
 		DetectTypeI(typ.base); ExtendRecord(typ);
 		ReadInt(symfile, cls); OpenScope;
@@ -582,7 +584,7 @@ BEGIN
 		module := modList[i]; Sys.Open(symfile, module.path);
 		ReadModkey(module.key); ReadInt(symfile, module.lev);
 		
-		OpenScope; curLev := -(i+1); ident := NIL;
+		OpenScope; curLev := -(i+2); ident := NIL;
 		ReadInt(symfile, cls);
 		WHILE cls # cNull DO
 			IF cls = cConst THEN
@@ -655,7 +657,7 @@ END NewModule;
 
 PROCEDURE Init*(modname: IdStr);
 BEGIN
-	NEW(universe); topScope := universe; curLev := 0;
+	NEW(universe); topScope := universe; curLev := -1;
 	modid := modname; modno := 0; strbufSize := 0;
 	
 	Enter(NewTypeObj(intType), 'INTEGER');
@@ -698,13 +700,13 @@ BEGIN
 	Enter(NewSProc('VAL', cSFunc), 'VAL');
 	
 	Enter(NewTypeObj(byteType), 'BYTE');
-	systemScope := topScope; CloseScope
+	systemScope := topScope; CloseScope; curLev := 0
 END Init;
 
 BEGIN
 	ExportType0 := ExportType; ImportType0 := ImportType;
 
-	preTypeNo := 0; predefinedTypes[0] := NIL; (* type no. 0 is no-type *)
+	preTypeNo := 0; predefinedTypes[0] := NIL; curLev := -1;
 	NewPredefinedType(intType, tInt);
 	NewPredefinedType(byteType, tInt);
 	NewPredefinedType(boolType, tBool);

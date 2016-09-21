@@ -64,11 +64,32 @@ TYPE
 		next: Proc
 	END;
 	
+	Item = POINTER TO RECORD
+		usedReg: SET; codeSize: INTEGER;
+		type: B.Type; obj: B.Object
+	END;
+	Var = POINTER TO RECORD (Item)
+		mod, rm, scl, bas, idx: BYTE; disp: INTEGER
+	END;
+	Imm = POINTER TO RECORD (Item)
+		size: BYTE; val: INTEGER
+	END;
+	Reg = POINTER TO RECORD (Item)
+		size, r: BYTE
+	END;
+	
+	Statement = POINTER TO RECORD
+		codeSize: INTEGER; next: Statement
+	END;
+	Assignment = POINTER TO RECORD (Statement)
+		x, y: Item
+	END;
+	
 VAR
 	code: ARRAY 200000H OF BYTE; cpos: INTEGER;
 	procList, curProc: Proc;
 
-	stack: INTEGER;
+	stack, regStack: INTEGER;
 	mem: RECORD
 		mod, rm, bas, idx, scl, disp: INTEGER
 	END;
@@ -549,7 +570,7 @@ BEGIN
 			tp.parblksize := size
 		ELSIF (tp.form = B.tArray) & (tp.len >= 0) THEN
 			SetTypeSize(tp.base); tp.align := tp.base.align;
-			IF MaxSize DIV tp.len < tp.base.size THEN
+			IF (tp.len # 0) & (MaxSize DIV tp.len < tp.base.size) THEN
 				MarkSizeError; tp.size := tp.align
 			ELSE tp.size := tp.base.size * tp.len
 			END
@@ -610,7 +631,7 @@ END AllocImport;
 PROCEDURE AllocStaticData;
 	VAR p: B.Ident; q: B.TypeList; x: B.Object;
 BEGIN p := B.strList;
-	WHILE p # NIL DO x := p.obj; x(B.Var).adr := staticSize;
+	WHILE p # NIL DO x := p.obj; x(B.Str).adr := staticSize;
 		staticSize := staticSize + 2*x(B.Str).len; p := p.next
 	END;
 	staticSize := staticSize + (-staticSize) MOD 8;
@@ -624,9 +645,51 @@ END AllocStaticData;
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
+PROCEDURE InitItem(x: Item; obj: B.Object);
+BEGIN x.usedReg := {}; x.codeSize := 0; x.obj := obj; x.type := obj.type
+END InitItem;
+
+PROCEDURE designator1(x: B.Object): Item;
+	VAR item: Item; imm: Imm; reg: Reg;
+		val: INTEGER;
+BEGIN
+	IF x IS B.Node THEN
+	ELSIF x IS B.Str THEN
+	ELSIF x IS B.Var THEN
+	ELSE x IS B.Const THEN val := x(B.Const);
+		IF (val > 0FFFFFFFFH) OR (val < -80000000H) THEN
+			NEW(reg); InitItem(reg, x); item := reg;
+			AllocReg(reg.r); reg.size := 8
+		ELSE NEW(imm); InitItem(imm, x); item := imm;
+			imm := 
+		END
+	END;
+	RETURN item
+END designator1;
+
+PROCEDURE StatementSequence1(statseq: B.Node): Statement;
+	VAR stat: B.Node; seq, cur, prev: Statement;
+		assgn: Assignment; x, y: B.Object;
+		prevRegStack: INTEGER;
+BEGIN
+	WHILE statseq.left # NIL DO
+		stat := statseq.left(B.Node);
+		IF stat.op = S.becomes THEN
+			NEW(assgn); assgn.x := designator1(stat.left);
+			assgn.y := expression1(stat.right); cur := assgn
+		END;
+		IF seq = NIL THEN seq := cur; prev := cur
+		ELSE prev.next := cur; prev := cur
+		END;
+		statseq := statseq.right
+	END;
+	RETURN res
+END StatementSequence;
+
 PROCEDURE Generate*(modinit: B.Node);
 BEGIN
-	AllocStaticData; 
+	AllocStaticData;
+	
 END Generate;
 
 PROCEDURE Init*(modid: B.IdStr);

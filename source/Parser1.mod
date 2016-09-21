@@ -94,14 +94,14 @@ PROCEDURE SamePars(p1, p2: B.Ident): BOOLEAN;
 		& (p1.obj(B.Var).ronly = p2.obj(B.Var).ronly)
 		& ((p1.obj.type = p2.obj.type)
 			OR (p1.obj.type.form = B.tArray) & (p2.obj.type.form = B.tArray)
-				& (p1.obj.type.len = 0) & (p2.obj.type.len = 0)
+				& (p1.obj.type.len < 0) & (p2.obj.type.len < 0)
 				& (p1.obj.type.base = p2.obj.type.base))
 		& SamePars(p1.next, p2.next)
 END SamePars;
 
 PROCEDURE SameProc(t1, t2: B.Type): BOOLEAN;
 	RETURN (t1.base = t2.base) & (t1.nfpar = t2.nfpar)
-		& (t1.parblksize = t2.parblksize) & SamePars(t1.fields, t2.fields)
+		& SamePars(t1.fields, t2.fields)
 END SameProc;
 
 PROCEDURE CompTypes(t1, t2: B.Type): BOOLEAN;
@@ -255,9 +255,9 @@ BEGIN x := FindIdent(); GetSym;
 				ident := ident.next
 			END;
 			IF ident # NIL THEN x := ident.obj;
-				IF (x IS B.Var) & (x(B.Var).lev < 0) & (x(B.Var).adr = 0)
-				OR (x IS B.Proc) & (x(B.Proc).lev < 0) & (x(B.Proc).adr = 0)
-				OR (x.class = B.cType) & (x.type.lev < 0) & (x.type.adr = 0)
+				IF (x IS B.Var) & (x(B.Var).lev < -1) & (x(B.Var).adr = 0)
+				OR (x IS B.Proc) & (x(B.Proc).lev < -1) & (x(B.Proc).adr = 0)
+				OR (x.class = B.cType) & (x.type.lev < -1) & (x.type.adr = 0)
 				THEN G.AllocImport(x)
 				END
 			ELSE Mark('not found'); x := NIL
@@ -611,7 +611,7 @@ BEGIN
 		END
 	ELSIF f.id = 'NEW' THEN
 		y := designator(); Check1(y, {B.tPtr}); CheckVar(y, FALSE);
-		IF (y.type.lev < 0) & (y.type.base.adr = 0) THEN
+		IF (y.type.lev < -1) & (y.type.base.adr = 0) THEN
 			IF y.type.base.obj # NIL THEN G.AllocImport(y.type.base.obj)
 			ELSE t := B.NewTypeObj(y.type.base); G.AllocImport(t)
 			END
@@ -1134,6 +1134,7 @@ BEGIN
 		Check0(S.period);
 	END;
 	IF S.errcnt = 0 THEN B.WriteSymfile END;
+	IF S.errcnt = 0 THEN G.Generate(modinit) END;
 	IF S.errcnt = 0 THEN
 		Sys.Console_WriteStr('Created symbol file: ');
 		Sys.Console_WriteStr(modid); Sys.Console_WriteStr('.sym');
