@@ -64,29 +64,28 @@ TYPE
 		next: Proc
 	END;
 	
-	Item = POINTER TO RECORD
-		usedReg: SET; codeSize: INTEGER;
-		type: B.Type; obj: B.Object
-	END;
-	Var = POINTER TO RECORD (Item)
-		mod, rm, scl, bas, idx: BYTE; disp: INTEGER
-	END;
-	Imm = POINTER TO RECORD (Item)
-		size: BYTE; val: INTEGER
-	END;
-	Reg = POINTER TO RECORD (Item)
-		size, r: BYTE
-	END;
-	
-	Statement = POINTER TO RECORD
-		codeSize: INTEGER; next: Statement
-	END;
-	Assignment = POINTER TO RECORD (Statement)
-		x, y: Item
-	END;
+	Inst = POINTER TO EXTENSIBLE RECORD next, link: Inst; sz: BYTE END;
+	Inst1 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 1 OF BYTE END;
+	Inst2 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 2 OF BYTE END;
+	Inst3 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 3 OF BYTE END;
+	Inst4 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 4 OF BYTE END;
+	Inst5 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 5 OF BYTE END;
+	Inst6 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 6 OF BYTE END;
+	Inst7 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 7 OF BYTE END;
+	Inst8 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 8 OF BYTE END;
+	Inst9 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 9 OF BYTE END;
+	Inst10 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 10 OF BYTE END;
+	Inst11 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 11 OF BYTE END;
+	Inst12 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 12 OF BYTE END;
+	Inst13 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 13 OF BYTE END;
+	Inst14 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 14 OF BYTE END;
+	Inst15 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 15 OF BYTE END;
+	Inst16 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 16 OF BYTE END;
+	Inst17 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 17 OF BYTE END;
+	Inst18 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 18 OF BYTE END;
 	
 VAR
-	code: ARRAY 200000H OF BYTE; cpos: INTEGER;
+	code: ARRAY 32 OF BYTE; cpos: INTEGER;
 	procList, curProc: Proc;
 
 	stack, regStack: INTEGER;
@@ -598,7 +597,7 @@ END SetTypeSize;
 PROCEDURE SetGlobalVarSize*(x: B.Object);
 BEGIN
 	varSize := varSize + (-varSize) MOD x.type.align;
-	x(B.Var).adr := varSize; varSize := varSize + x.type.size;
+	varSize := varSize + x.type.size; x(B.Var).adr := -varSize;
 	IF varSize > MaxSize THEN varSize := 0; MarkSizeError END
 END SetGlobalVarSize;
 
@@ -649,42 +648,7 @@ PROCEDURE InitItem(x: Item; obj: B.Object);
 BEGIN x.usedReg := {}; x.codeSize := 0; x.obj := obj; x.type := obj.type
 END InitItem;
 
-PROCEDURE designator1(x: B.Object): Item;
-	VAR item: Item; imm: Imm; reg: Reg;
-		val: INTEGER;
-BEGIN
-	IF x IS B.Node THEN
-	ELSIF x IS B.Str THEN
-	ELSIF x IS B.Var THEN
-	ELSE x IS B.Const THEN val := x(B.Const);
-		IF (val > 0FFFFFFFFH) OR (val < -80000000H) THEN
-			NEW(reg); InitItem(reg, x); item := reg;
-			AllocReg(reg.r); reg.size := 8
-		ELSE NEW(imm); InitItem(imm, x); item := imm;
-			imm := 
-		END
-	END;
-	RETURN item
-END designator1;
-
-PROCEDURE StatementSequence1(statseq: B.Node): Statement;
-	VAR stat: B.Node; seq, cur, prev: Statement;
-		assgn: Assignment; x, y: B.Object;
-		prevRegStack: INTEGER;
-BEGIN
-	WHILE statseq.left # NIL DO
-		stat := statseq.left(B.Node);
-		IF stat.op = S.becomes THEN
-			NEW(assgn); assgn.x := designator1(stat.left);
-			assgn.y := expression1(stat.right); cur := assgn
-		END;
-		IF seq = NIL THEN seq := cur; prev := cur
-		ELSE prev.next := cur; prev := cur
-		END;
-		statseq := statseq.right
-	END;
-	RETURN res
-END StatementSequence;
+PROCEDURE StatSeq(s: B.St
 
 PROCEDURE Generate*(modinit: B.Node);
 BEGIN
