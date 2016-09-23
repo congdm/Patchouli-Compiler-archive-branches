@@ -56,6 +56,9 @@ CONST
 	MOVAPS = 280F00H; MOVAPSd = 290F00H; COMISS = 2F0F00H;
 	CVTSS2SI = 2D0FF3H; CVTSI2SS = 2A0FF3H;
 	
+	(* Node pseudo-opcode *)
+	opNone = 0; opMul = 1;
+	
 TYPE
 	Proc = POINTER TO RECORD
 		usedRegs: SET; adr, parWindowSize: INTEGER;
@@ -83,6 +86,11 @@ TYPE
 	Inst16 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 16 OF BYTE END;
 	Inst17 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 17 OF BYTE END;
 	Inst18 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 18 OF BYTE END;
+	
+	Node = POINTER TO RECORD
+		mode, op, r, rm, sz: BYTE; a: INTEGER;
+		needReg: SET; type: B.Type; x, y, next: Node
+	END
 	
 VAR
 	code: ARRAY 32 OF BYTE; cpos: INTEGER;
@@ -648,7 +656,34 @@ PROCEDURE InitItem(x: Item; obj: B.Object);
 BEGIN x.usedReg := {}; x.codeSize := 0; x.obj := obj; x.type := obj.type
 END InitItem;
 
-PROCEDURE StatSeq(s: B.St
+PROCEDURE LoadVar(VAR x: Node);
+BEGIN IF x.mode IN {mRegI, mIP, mBP, mSP} THEN load(x) END
+END LoadVar;
+
+PROCEDURE MakeNode(x: B.Object): Node;
+	VAR node: Node; pn: B.Node; sym: INTEGER;
+BEGIN NEW(node); node.type := x.type;
+	IF x IS B.Const THEN
+	ELSIF x IS B.Var THEN
+	ELSIF x IS B.Proc THEN
+	ELSIF x IS B.Node THEN
+		pn := x(B.Node); sym := pn.op; node.op := SymToOp(sym);
+		IF (sym >= S.times) & (sym <= S.mod)
+		OR (sym = S.plus) OR (pn.op = S.plus) OR (sym = S.in) THEN		
+			node.x := MakeNode(pn.left); LoadVar(node.x);
+			node.y := MakeNode(pn.right); LoadVar(node.y);
+			IF pn.type # B.realType THEN node.mode := mReg
+			ELSE node.mode := mXReg
+			END; node.sz := x.type.size
+		ELSIF (sym = S.and) OR (sym = S.or) THEN
+			node.x := MakeNode(pn.left); LoadToCond(node.x);
+			node.y := MakeNode(pn.right); LoadToCond(node.y);
+		END
+	ELSIF x.class = B.cType THEN
+	ELSE ASSERT(FALSE)
+	END
+	RETURN node
+END MakeNode;
 
 PROCEDURE Generate*(modinit: B.Node);
 BEGIN
