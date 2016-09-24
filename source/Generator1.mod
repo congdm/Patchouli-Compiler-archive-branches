@@ -88,8 +88,8 @@ TYPE
 	Inst18 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 18 OF BYTE END;
 	
 	Node = POINTER TO RECORD
-		mode, op, r, rm, sz: BYTE; a: INTEGER;
-		needReg: SET; type: B.Type; x, y, next: Node
+		mode, op, r, rm, sz: BYTE; ref: BOOLEAN; a: INTEGER;
+		needReg: SET; type: B.Type; x, y, next, fLink, tLink: Node
 	END
 	
 VAR
@@ -656,9 +656,17 @@ PROCEDURE InitItem(x: Item; obj: B.Object);
 BEGIN x.usedReg := {}; x.codeSize := 0; x.obj := obj; x.type := obj.type
 END InitItem;
 
+PROCEDURE RefToRegI(VAR x: Node);
+BEGIN IF x.ref THEN Deref(x) END
+END RefToRegI;
+
 PROCEDURE LoadVar(VAR x: Node);
 BEGIN IF x.mode IN {mRegI, mIP, mBP, mSP} THEN load(x) END
 END LoadVar;
+
+PROCEDURE ToCond(VAR x: Node);
+BEGIN
+END ToCond;
 
 PROCEDURE MakeNode(x: B.Object): Node;
 	VAR node: Node; pn: B.Node; sym: INTEGER;
@@ -669,15 +677,48 @@ BEGIN NEW(node); node.type := x.type;
 	ELSIF x IS B.Node THEN
 		pn := x(B.Node); sym := pn.op; node.op := SymToOp(sym);
 		IF (sym >= S.times) & (sym <= S.mod)
-		OR (sym = S.plus) OR (pn.op = S.plus) OR (sym = S.in) THEN		
+		OR (sym = S.plus) OR (pn.op = S.plus) THEN
 			node.x := MakeNode(pn.left); LoadVar(node.x);
 			node.y := MakeNode(pn.right); LoadVar(node.y);
 			IF pn.type # B.realType THEN node.mode := mReg
 			ELSE node.mode := mXReg
 			END; node.sz := x.type.size
 		ELSIF (sym = S.and) OR (sym = S.or) THEN
-			node.x := MakeNode(pn.left); LoadToCond(node.x);
-			node.y := MakeNode(pn.right); LoadToCond(node.y);
+			node.x := MakeNode(pn.left); ToCond(node.x);
+			node.y := MakeNode(pn.right); ToCond(node.y);
+			node.mode := mCond;
+			IF sym = S.and THEN
+				node.fLink := merged(node.x.fLink, node.y.fLink);
+				node.tLink := node.y.tLink
+			ELSE
+				node.tLink := merged(node.x.tLink, node.y.tLink);
+				node.fLink := node.y.fLink
+			END
+		ELSIF sym = S.is THEN
+			node.x := TypeTag(MakeNode(pn.left));
+			node.y := TypeDesc(pn.right.type);
+			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
+		ELSIF sym = S.in THEN
+			node.x := MakeNode(pn.left); LoadVar(node.x);
+			node.y := MakeNode(pn.right); LoadVar(node.y);
+			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
+		ELSIF (sym >= S.eql) & (sym <= S.geq) THEN
+			IF (pn.right.type = B.strType) & (pn.left.type = B.charType)
+			THEN
+				node.y := StrToChar(pn.right);
+				node.x := MakeNode(pn.left); LoadVar(node.x)
+			ELSIF (pn.left.type = B.strType) & (pn.right.type = B.charType)
+			THEN
+				node.x := StrToChar(pn.left);
+				node.y := MakeNode(pn.right); LoadVar(node.y)
+			ELSIF ~(pn.left.type.form IN {B.tArray, B.tStr}) THEN
+				node.x := MakeNode(pn.left); LoadVar(node.x);
+				node.y := MakeNode(pn.right); LoadVar(node.y)
+			ELSE
+				node.x := MakeNode(pn.left); RefToRegI(node.x);
+				node.y := MakeNode(pn.right); RefToRegI(node.y)
+			END;
+			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
 		END
 	ELSIF x.class = B.cType THEN
 	ELSE ASSERT(FALSE)
