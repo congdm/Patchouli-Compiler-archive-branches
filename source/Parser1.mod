@@ -374,28 +374,43 @@ END designator;
 (* -------------------------------------------------------------------------- *)
 
 PROCEDURE StdFunc(f: B.SProc): B.Node;
-	VAR x, par, par2: B.Node; y: B.Object;
-BEGIN
-	x := NewNode(S.sproc, f, NIL); GetSym;
+	VAR par, par2: B.Node; x, y, z: B.Object;
+BEGIN GetSym;
 	IF f.id = 'ABS' THEN y := expression0(); Check1(y, {B.tInt, B.tReal});
-		IF y.type.form
-		par := NewNode(S.par, y, NIL); x.right := par;
-		IF y.type.form = B.tInt THEN x.type := B.intType
-		ELSE x.type := y.type
+		IF y IS B.Const THEN x := G.AbsConst(y)
+		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
+			IF y.type.form = B.tInt THEN x.type := B.intType
+			ELSE x.type := y.type
+			END
 		END
 	ELSIF f.id = 'ODD' THEN y := expression0(); CheckInt(y);
-		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.boolType
+		IF y IS B.Const THEN x := G.OddConst(y)
+		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
+			x.type := B.boolType
+		END
 	ELSIF f.id = 'LEN' THEN y := designator(); Check1(y, {B.tArray});
-		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
+		IF y.type.len >= 0 THEN x := B.NewConst(B.intType, y.type.len)
+		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
+			x.type := B.intType
+		END
 	ELSIF (f.id = 'LSL') OR (f.id = 'ASR') OR (f.id = 'ROR') THEN
-		x.type := B.intType; y := expression0(); CheckInt(y);
-		par := NewNode(S.par, y, NIL); x.right := par;
-		Check0(S.comma); y := expression0(); CheckInt(y);
-		par2 := NewNode(S.par, y, NIL); par.right := par2
+		y := expression0(); CheckInt(y);
+		Check0(S.comma); z := expression0(); CheckInt(z);
+		IF (y IS B.Const) & (z IS B.Const) THEN x := G.ShiftConst(f.id, y, z)
+		ELSE z := NewNode(S.par, z, NIL);
+			x := NewNode(S.sproc, f, NewNode(S.par, y, z));
+			x.type := B.intType
+		END
 	ELSIF f.id = 'FLOOR' THEN y := expression0(); CheckReal(y);
-		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
+		IF y IS B.Const THEN x := G.FloorConst(y)
+		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
+			x.type := B.intType
+		END
 	ELSIF f.id = 'FLT' THEN y := expression0(); CheckInt(y);
-		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.realType
+		IF y IS B.Const THEN x := G.FloorConst(y)
+		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
+			x.type := B.intType
+		END
 	ELSIF f.id = 'ORD' THEN y := expression0();
 		IF (y.type # B.strType) OR (y(B.Str).len > 2) THEN
 			Check1(y, {B.tSet, B.tBool, B.tChar})
