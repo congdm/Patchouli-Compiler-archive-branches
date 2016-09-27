@@ -375,6 +375,7 @@ END designator;
 
 PROCEDURE StdFunc(f: B.SProc): B.Node;
 	VAR par, par2: B.Node; x, y, z: B.Object;
+		ch: CHAR;
 BEGIN GetSym;
 	IF f.id = 'ABS' THEN y := expression0(); Check1(y, {B.tInt, B.tReal});
 		IF y IS B.Const THEN x := G.AbsConst(y)
@@ -407,7 +408,7 @@ BEGIN GetSym;
 			x.type := B.intType
 		END
 	ELSIF f.id = 'FLT' THEN y := expression0(); CheckInt(y);
-		IF y IS B.Const THEN x := G.FloorConst(y)
+		IF y IS B.Const THEN x := G.FltConst(y)
 		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
 			x.type := B.intType
 		END
@@ -415,27 +416,36 @@ BEGIN GetSym;
 		IF (y.type # B.strType) OR (y(B.Str).len > 2) THEN
 			Check1(y, {B.tSet, B.tBool, B.tChar})
 		END;
+		IF (y IS B.Str) & (y(B.Str).len <= 2) THEN
+			ch := B.strbuf[y(B.Str).bufpos];
+			x := B.NewConst(B.intType, ORD(ch))
+		ELSIF x IS B.Const THEN x := B.NewConst(B.intType, x(B.Const).val)
+		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
+			x.type := B.intType
+		END
 		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
 	ELSIF f.id = 'CHR' THEN y := expression0(); CheckInt(y);
-		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.charType
+		IF y IS B.Const THEN x := B.NewConst(B.charType, y(B.Const).val)
+		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
+			x.type := B.charType
+		END
 	ELSIF f.id = 'ADR' THEN y := designator(); CheckVar(y, TRUE);
-		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
+		x := NewNode(S.sproc, f, NewNode(S.par, y, NIL)); x.type := B.intType
 	ELSIF f.id = 'SIZE' THEN y := qualident();
 		IF y.class # B.cType THEN Mark('not type') END;
-		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
+		x := B.NewConst(B.intType, y.type.size)
 	ELSIF f.id = 'BIT' THEN
-		x.type := B.boolType; y := expression0(); CheckInt(y);
-		par := NewNode(S.par, y, NIL); x.right := par;
-		Check0(S.comma); y := expression0(); CheckInt(y);
-		par2 := NewNode(S.par, y, NIL); par.right := par2
+		y := expression0(); CheckInt(y); Check0(S.comma);
+		z := expression0(); CheckInt(z); z := NewNode(S.par, z, NIL);
+		x := NewNode(S.sproc, f, NewNode(S.par, y, z)); x.type := B.boolType
 	ELSIF f.id = 'VAL' THEN y := qualident();
 		IF y.class # B.cType THEN Mark('not type')
 		ELSIF y.type.form IN {B.tArray, B.tRec} THEN Mark('not scalar')
 		END;
-		par := NewNode(S.par, y, NIL); x.right := par; x.type := y.type;
-		Check0(S.comma); y := expression0();
-		IF y.type.form IN {B.tArray, B.tRec} THEN Mark('not scalar') END;
-		par2 := NewNode(S.par, y, NIL); par.right := par2
+		Check0(S.comma); z := expression0();
+		IF z.type.form IN {B.tArray, B.tRec} THEN Mark('not scalar') END;
+		z := NewNode(S.par, z, NIL);
+		x := NewNode(S.sproc, f, NewNode(S.par, y, z)); x.type := y.type
 	END;
 	Check0(S.rparen);
 	RETURN x
