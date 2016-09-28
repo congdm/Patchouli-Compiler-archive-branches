@@ -672,6 +672,7 @@ PROCEDURE MakeNode(x: B.Object): Node;
 	VAR node: Node; pn: B.Node; sym: INTEGER;
 BEGIN NEW(node); node.type := x.type;
 	IF x IS B.Const THEN
+		IF
 	ELSIF x IS B.Var THEN
 	ELSIF x IS B.Proc THEN
 	ELSIF x IS B.Node THEN
@@ -694,14 +695,6 @@ BEGIN NEW(node); node.type := x.type;
 				node.tLink := merged(node.x.tLink, node.y.tLink);
 				node.fLink := node.y.fLink
 			END
-		ELSIF sym = S.is THEN
-			node.x := TypeTag(MakeNode(pn.left));
-			node.y := TypeDesc(pn.right.type);
-			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
-		ELSIF sym = S.in THEN
-			node.x := MakeNode(pn.left); LoadVar(node.x);
-			node.y := MakeNode(pn.right); LoadVar(node.y);
-			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
 		ELSIF (sym >= S.eql) & (sym <= S.geq) THEN
 			IF (pn.right.type = B.strType) & (pn.left.type = B.charType)
 			THEN
@@ -719,6 +712,18 @@ BEGIN NEW(node); node.type := x.type;
 				node.y := MakeNode(pn.right); RefToRegI(node.y)
 			END;
 			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
+		ELSIF sym = S.is THEN
+			node.x := TypeTag(MakeNode(pn.left));
+			node.y := TypeDesc(pn.right.type);
+			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
+		ELSIF sym = S.in THEN
+			node.x := MakeNode(pn.left); LoadVar(node.x);
+			node.y := MakeNode(pn.right); LoadVar(node.y);
+			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
+		ELSIF sym = S.arrow THEN node.x := MakeNode(pn.left)
+		ELSIF sym = S.period THEN
+			node.x := MakeNode(pn.left); node.y := MakeNode(pn.right)
+			
 		END
 	ELSIF x.class = B.cType THEN
 	ELSE ASSERT(FALSE)
