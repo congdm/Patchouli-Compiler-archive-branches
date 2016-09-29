@@ -725,12 +725,7 @@ BEGIN NEW(node); node.type := x.type;
 			node.mode := mRegI; node.ref := FALSE
 		ELSIF sym = S.period THEN
 			node.x := MakeNode(pn.left); node.y := MakeNode(pn.right);
-			IF node.y.mode = mImm THEN
-				node.mode := node.x.mode; node.ref := node.x.ref
-			ELSIF node.x.mode = mReg THEN
-				node.mode := mRegI; node.ref := FALSE
-			ELSE ASSERT(FALSE)
-			END
+			node.mode := node.x.mode; node.ref := node.x.ref
 		ELSIF sym = S.not THEN
 			node.x := MakeNode(pn.left); ToCond(node.x);
 			node.mode := mCond; node.fLink := node.x.tLink;
@@ -738,6 +733,14 @@ BEGIN NEW(node); node.type := x.type;
 		ELSIF sym = S.lparen THEN
 			node.x := MakeNode(pn.left); node.y := TypeDesc(pn.right.type);
 			node.mode := node.x.mode; node.ref := node.x.ref
+		ELSIF sym = S.lbrak THEN
+			node.x := MakeNode(pn.left); node.y := MakeNode(pn.right);
+			IF node.y.mode = mImm THEN
+				node.mode := node.x.mode; node.ref := node.x.ref
+			ELSE LoadVar(node.y); node.mode := mRegI; node.ref := FALSE
+			END
+		ELSIF sym = S.if THEN
+			node.x := MakeNode(pn.left); 
 		END
 	ELSIF x.class = B.cType THEN
 	ELSE ASSERT(FALSE)
