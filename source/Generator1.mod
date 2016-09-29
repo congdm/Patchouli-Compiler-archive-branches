@@ -88,7 +88,7 @@ TYPE
 	Inst18 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 18 OF BYTE END;
 	
 	Node = POINTER TO RECORD
-		mode, op, r, rm, sz: BYTE; ref: BOOLEAN; a: INTEGER;
+		mode, op, r, rm, sz: BYTE; ref: BOOLEAN; a, b: INTEGER;
 		needReg: SET; type: B.Type; x, y, next, fLink, tLink: Node
 	END
 	
@@ -669,7 +669,7 @@ BEGIN
 END ToCond;
 
 PROCEDURE MakeNode(x: B.Object): Node;
-	VAR node: Node; pn: B.Node; sym: INTEGER;
+	VAR node, t: Node; pn: B.Node; sym: INTEGER;
 BEGIN NEW(node); node.type := x.type;
 	IF x IS B.Const THEN
 		IF
@@ -720,10 +720,24 @@ BEGIN NEW(node); node.type := x.type;
 			node.x := MakeNode(pn.left); LoadVar(node.x);
 			node.y := MakeNode(pn.right); LoadVar(node.y);
 			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
-		ELSIF sym = S.arrow THEN node.x := MakeNode(pn.left)
+		ELSIF sym = S.arrow THEN
+			node.x := MakeNode(pn.left); LoadVar(node.x);
+			node.mode := mRegI; node.ref := FALSE
 		ELSIF sym = S.period THEN
-			node.x := MakeNode(pn.left); node.y := MakeNode(pn.right)
-			
+			node.x := MakeNode(pn.left); node.y := MakeNode(pn.right);
+			IF node.y.mode = mImm THEN
+				node.mode := node.x.mode; node.ref := node.x.ref
+			ELSIF node.x.mode = mReg THEN
+				node.mode := mRegI; node.ref := FALSE
+			ELSE ASSERT(FALSE)
+			END
+		ELSIF sym = S.not THEN
+			node.x := MakeNode(pn.left); ToCond(node.x);
+			node.mode := mCond; node.fLink := node.x.tLink;
+			node.tLink := node.x.fLink
+		ELSIF sym = S.lparen THEN
+			node.x := MakeNode(pn.left); node.y := TypeDesc(pn.right.type);
+			node.mode := node.x.mode; node.ref := node.x.ref
 		END
 	ELSIF x.class = B.cType THEN
 	ELSE ASSERT(FALSE)
