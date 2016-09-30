@@ -88,8 +88,9 @@ TYPE
 	Inst18 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 18 OF BYTE END;
 	
 	Node = POINTER TO RECORD
-		mode, op, r, rm, sz: BYTE; ref: BOOLEAN; a, b: INTEGER;
-		needReg: SET; type: B.Type; x, y, next, fLink, tLink: Node
+		mode, op, r, rm, sz: BYTE; ref, tLinkEnd, fLinkEnd: BOOLEAN;
+		a, b: INTEGER; needReg: SET; type: B.Type;
+		x, y, next, fLink, tLink: Node
 	END
 	
 VAR
@@ -671,6 +672,7 @@ END ToCond;
 PROCEDURE MakeNode(x: B.Object): Node;
 	VAR node, t: Node; pn: B.Node; sym: INTEGER;
 BEGIN NEW(node); node.type := x.type;
+	node.tLinkEnd := FALSE; node.fLinkEnd := FALSE;
 	IF x IS B.Const THEN
 		IF
 	ELSIF x IS B.Var THEN
