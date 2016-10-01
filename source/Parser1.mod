@@ -707,6 +707,7 @@ BEGIN
 	if := NewNode(S.if, x, then);
 	IF sym = S.elsif THEN then.right := If(lev+1)
 	ELSIF sym = S.else THEN GetSym; then.right := StatementSequence0()
+	ELSE then.right := NewNode(S.null, NIL, NIL)
 	END;
 	IF lev = 0 THEN Check0(S.end) END;
 	RETURN if
@@ -718,7 +719,9 @@ BEGIN
 	GetSym; x := expression(); CheckBool(x); Check0(S.do);
 	do := NewNode(S.do, StatementSequence0(), NIL);
 	while := NewNode(S.while, x, do);
-	IF sym = S.elsif THEN do.right := While(lev+1) END;
+	IF sym = S.elsif THEN do.right := While(lev+1)
+	ELSE do.right := NewNode(S.null, NIL, NIL)
+	END;
 	IF lev = 0 THEN Check0(S.end) END;
 	RETURN while
 END While;
