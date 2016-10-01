@@ -671,6 +671,7 @@ END ToCond;
 
 PROCEDURE MakeNode(x: B.Object): Node;
 	VAR node, t: Node; pn: B.Node; sym: INTEGER;
+		then, else: Node;
 BEGIN NEW(node); node.type := x.type;
 	node.tLinkEnd := FALSE; node.fLinkEnd := FALSE;
 	IF x IS B.Const THEN
@@ -742,7 +743,10 @@ BEGIN NEW(node); node.type := x.type;
 			ELSE LoadVar(node.y); node.mode := mRegI; node.ref := FALSE
 			END
 		ELSIF sym = S.if THEN
-			node.x := MakeNode(pn.left); 
+			node.x := MakeNode(pn.left); node.y := MakeNode(pn.right);
+			then := node.y.x; else := node.y.y;
+			then.tLink := node.x; then.tLinkEnd := TRUE;
+			else.fLink := node.x; else.fLinkEnd := TRUE
 		END
 	ELSIF x.class = B.cType THEN
 	ELSE ASSERT(FALSE)
