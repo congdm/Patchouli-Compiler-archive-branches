@@ -56,9 +56,6 @@ CONST
 	MOVAPS = 280F00H; MOVAPSd = 290F00H; COMISS = 2F0F00H;
 	CVTSS2SI = 2D0FF3H; CVTSI2SS = 2A0FF3H;
 	
-	(* Node pseudo-opcode *)
-	opNone = 0; opMul = 1;
-	
 TYPE
 	Proc = POINTER TO RECORD
 		usedRegs: SET; adr, parWindowSize: INTEGER;
@@ -669,14 +666,19 @@ PROCEDURE ToCond(VAR x: Node);
 BEGIN
 END ToCond;
 
+PROCEDURE SymToOp(sym: INTEGER): INTEGER;
+	RETURN sym
+END SymToOp;
+
 PROCEDURE MakeNode(x: B.Object): Node;
-	VAR node, t: Node; pn: B.Node; sym: INTEGER;
-		then, else: Node;
+	VAR node, t: Node; pn: B.Node; sym, val: INTEGER;
+		then, else, do: Node;
 BEGIN NEW(node); node.type := x.type;
 	node.tLinkEnd := FALSE; node.fLinkEnd := FALSE;
 	IF x IS B.Const THEN
-		IF
+		val := x(B.Const).val; x.mode := mImm; x.a := val
 	ELSIF x IS B.Var THEN
+		
 	ELSIF x IS B.Proc THEN
 	ELSIF x IS B.Node THEN
 		pn := x(B.Node); sym := pn.op; node.op := SymToOp(sym);
@@ -742,17 +744,24 @@ BEGIN NEW(node); node.type := x.type;
 				node.mode := node.x.mode; node.ref := node.x.ref
 			ELSE LoadVar(node.y); node.mode := mRegI; node.ref := FALSE
 			END
-		ELSIF sym = S.if THEN
-			node.x := MakeNode(pn.left); node.y := MakeNode(pn.right);
-			then := node.y.x; else := node.y.y;
-			then.tLink := node.x; then.tLinkEnd := TRUE;
-			else.fLink := node.x; else.fLinkEnd := TRUE
+		ELSIF (sym = S.if) OR (sym = S.then) OR (sym = S.while)
+		OR (sym = S.do) OR (sym = S.repeat) THEN
+			node.x := MakeNode(pn.left); node.y := MakeNode(pn.right)
+		ELSIF sym = S.becomes THEN
+			node.x := MakeNode(pn.left); node.y := MakeNode(pn.right)
 		END
 	ELSIF x.class = B.cType THEN
 	ELSE ASSERT(FALSE)
-	END
+	END;
 	RETURN node
 END MakeNode;
+
+PROCEDURE Pass1(node: Node);
+BEGIN
+	IF node.op = S.times THEN
+		
+	END
+END Pass1;
 
 PROCEDURE Generate*(modinit: B.Node);
 BEGIN
