@@ -38,7 +38,10 @@ TYPE
 	Const* = POINTER TO EXTENSIBLE RECORD (ObjDesc) val*: INTEGER END;
 	Field* = POINTER TO EXTENSIBLE RECORD (ObjDesc) off*: INTEGER END;
 	Var* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
-		adr*, expno*, lev*: INTEGER; ronly*, par*, ref*: BOOLEAN
+		adr*, expno*, lev*: INTEGER; ronly*: BOOLEAN
+	END;
+	Par* = POINTER TO EXTENSIBLE RECORD (Var)
+		varpar*: BOOLEAN; no: INTEGER
 	END;
 	Proc* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
 		adr*, expno*, lev*, locblksize*: INTEGER;
@@ -152,11 +155,11 @@ BEGIN
 	RETURN c
 END NewConst;
 
-PROCEDURE NewPar*(proc, tp: Type; ref, ronly: BOOLEAN): Var;
+PROCEDURE NewPar*(proc, tp: Type; varpar: BOOLEAN): Var;
 	VAR v: Var;
 BEGIN
 	NEW(v); v.class := cVar;
-	v.ronly := ronly; v.par := TRUE; v.ref := ref;
+	v.par := TRUE; v.varpar := varpar;
 	v.type := tp; v.lev := curLev;
 	INC(proc.nfpar);
 	RETURN v

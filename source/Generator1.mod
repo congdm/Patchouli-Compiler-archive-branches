@@ -56,6 +56,9 @@ CONST
 	MOVAPS = 280F00H; MOVAPSd = 290F00H; COMISS = 2F0F00H;
 	CVTSS2SI = 2D0FF3H; CVTSI2SS = 2A0FF3H;
 	
+	mReg = 0; mXReg = 1; mImm = 2; mRegI = 3; mIP = 4; mSP = 5; mBP = 6;
+	mProc = 7; mType = 8;
+	
 TYPE
 	Proc = POINTER TO RECORD
 		usedRegs: SET; adr, parWindowSize: INTEGER;
@@ -671,16 +674,27 @@ PROCEDURE SymToOp(sym: INTEGER): INTEGER;
 END SymToOp;
 
 PROCEDURE MakeNode(x: B.Object): Node;
-	VAR node, t: Node; sym, val: INTEGER;
-		then, else, do: Node;
+	VAR node: Node; sym, val: INTEGER;
 BEGIN
 	IF x = NIL THEN node := NIL
 	ELSE NEW(node);
 		node.type := x.type; node.mustUseRegs := {}; node.ref := FALSE;
 		IF x IS B.Const THEN
-			val := x(B.Const).val; x.mode := mImm; x.a := val
+			val := x(B.Const).val; node.mode := mImm; node.a := val
 		ELSIF x IS B.Var THEN
+			node.a := x(B.Var).adr;
+			IF x(B.Var).lev = 0 THEN node.mode := mIP
+			ELSIF x(B.Var).lev > 0 THEN
+				node.mode := mSP; node.ref := x(B.Var).ref
+			ELSIF x(B.Var).lev < -1 THEN node.mode := mIP; node.ref := TRUE
+			ELSE ASSERT(FALSE);
+			END
 		ELSIF x IS B.Proc THEN
+			node.mode := mProc; node.a := x(B.Proc).adr;
+			node.ref := x(B.Proc).lev < -1
+		ELSIF x.class = B.cType THEN
+			node.mode := mType; node.a := x.type.adr;
+			node.ref := x.type.lev < -1
 		ELSIF x IS B.Node THEN
 			sym := x(B.Node).op; node.op := SymToOp(sym);
 			node.x := MakeNode(x(B.Node).left);
@@ -696,10 +710,15 @@ BEGIN
 				LoadVar(node.x); LoadVar(node.y);
 				IF pn.type # B.realType THEN node.mode := mReg;
 					IF (sym = S.div) OR (sym = S.mod) THEN
-						node.mustUseRegs := node.mustUseRegs + {reg_A, reg_D}
+						IF (node.y.mode # mImm) OR (log2(node.y.a) < 0) THEN 
+							INCL(node.mustUseRegs, reg_A);
+							INCL(node.mustUseRegs, reg_D)
+						ELSIF log2(node.y.a) >= 2 THEN
+							INCL(node.mustUseRegs, reg_C)
+						END
 					ELSIF sym = S.times THEN
-						IF (node.y.mode = mImm) & (log2(node.y) >= 2)
-						OR (node.x.mode = mImm) & (log2(node.x) >= 2)
+						IF (node.y.mode = mImm) & (log2(node.y.a) >= 2)
+						OR (node.x.mode = mImm) & (log2(node.x.a) >= 2)
 						THEN INCL(node.mustUseRegs, reg_C)
 						END
 					END
@@ -745,18 +764,19 @@ BEGIN
 					node.mode := node.x.mode; node.ref := node.x.ref
 				ELSE LoadVar(node.y); node.mode := mRegI
 				END
+			ELSIF sym = S.par THEN
+				IF 
 			END
-		ELSIF x.class = B.cType THEN
 		ELSE ASSERT(FALSE)
 		END
 	END;
 	RETURN node
 END MakeNode;
 
-PROCEDURE Pass1(node: Node);
+PROCEDURE Pass1(node: Node; usedRegs: SET; );
 BEGIN
-	IF node.op = S.times THEN
-		
+	IF node.op = S.par THEN
+		IF node.x & 
 	END
 END Pass1;
 
