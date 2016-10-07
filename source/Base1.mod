@@ -141,8 +141,7 @@ END AppendStr;
 PROCEDURE NewVar*(tp: Type): Var;
 	VAR v: Var;
 BEGIN
-	NEW(v); v.class := cVar;
-	v.ronly := FALSE; v.par := FALSE; v.ref := FALSE;
+	NEW(v); v.class := cVar; v.ronly := FALSE;
 	v.type := tp; v.lev := curLev;
 	RETURN v
 END NewVar;
@@ -155,14 +154,14 @@ BEGIN
 	RETURN c
 END NewConst;
 
-PROCEDURE NewPar*(proc, tp: Type; varpar: BOOLEAN): Var;
-	VAR v: Var;
+PROCEDURE NewPar*(proc, tp: Type; varpar: BOOLEAN): Par;
+	VAR p: Par;
 BEGIN
-	NEW(v); v.class := cVar;
-	v.par := TRUE; v.varpar := varpar;
-	v.type := tp; v.lev := curLev;
-	INC(proc.nfpar);
-	RETURN v
+	NEW(p); p.class := cVar;
+	p.type := tp; p.lev := curLev;
+	p.varpar := varpar; INC(proc.nfpar); p.no := proc.nfpar;
+	p.ronly := ~varpar & (tp.form IN {B.tArray, B.tRec});
+	RETURN p
 END NewPar;
 
 PROCEDURE NewField*(rec, tp: Type): Field;
@@ -176,8 +175,7 @@ END NewField;
 PROCEDURE NewStr*(str: String; slen: INTEGER): Str;
 	VAR x: Str; i: INTEGER; p: Ident;
 BEGIN
-	NEW(x); x.class := cVar;
-	x.par := FALSE; x.ronly := TRUE; x.ref := FALSE;
+	NEW(x); x.class := cVar; x.ronly := TRUE;
 	x.type := strType; x.lev := curLev; x.len := slen;
 	IF str[0] # 0X (* need alloc buffer *) THEN 
 		IF strbufSize + slen >= LEN(strbuf) THEN
@@ -324,15 +322,14 @@ BEGIN
 END DetectType;
 
 PROCEDURE ExportProc(typ: Type);
-	VAR par: Ident; x: Var;
+	VAR par: Ident; x: Par;
 BEGIN
 	WriteInt(symfile, typ.size); WriteInt(symfile, typ.align);
 	DetectType(typ.base); par := typ.fields;
-	WHILE par # NIL DO x := par.obj(Var);
+	WHILE par # NIL DO x := par.obj(Par);
 		WriteInt(symfile, x.class);
 		Sys.WriteStr(symfile, par.name);
-		WriteInt(symfile, ORD(x.ronly));
-		WriteInt(symfile, ORD(x.ref));
+		WriteInt(symfile, ORD(x.varpar));
 		DetectType(x.type);
 		par := par.next
 	END;
@@ -513,17 +510,16 @@ BEGIN i := -(curLev+2);
 END AddToTypeList;
 
 PROCEDURE ImportProc(VAR typ: Type; isType: BOOLEAN);
-	VAR par: Ident; x: Var; xtype: Type;
-		cls, n: INTEGER; name: IdStr; ronly, ref: BOOLEAN;
+	VAR par: Ident; x: Par; xtype: Type;
+		cls, n: INTEGER; name: IdStr; varpar: BOOLEAN;
 BEGIN
 	typ := NewProcType(); IF isType THEN AddToTypeList(typ) END;
 	ReadInt(symfile, typ.size); ReadInt(symfile, typ.align);
 	DetectTypeI(typ.base); ReadInt(symfile, cls); OpenScope;
 	WHILE cls # cType DO
 		Sys.ReadStr(symfile, name);
-		ReadInt(symfile, n); ronly := n = ORD(TRUE);
-		ReadInt(symfile, n); ref := n = ORD(TRUE);
-		DetectTypeI(xtype); x := NewPar(typ, xtype, ref, ronly);
+		ReadInt(symfile, n); varpar := n = ORD(TRUE);
+		DetectTypeI(xtype); x := NewPar(typ, xtype, varpar);
 		par := NewImportIdent(par, name, x);
 		ReadInt(symfile, cls)
 	END;

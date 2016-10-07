@@ -76,7 +76,7 @@ BEGIN
 END IsExt;
 
 PROCEDURE IsVarPar(x: B.Object): BOOLEAN;
-	RETURN (x.class = B.cVar) & x(B.Var).par & x(B.Var).ref
+	RETURN (x IS B.Par) & x(B.Par).varpar
 END IsVarPar;
 
 PROCEDURE IsConst(x: B.Object): BOOLEAN;
@@ -90,8 +90,7 @@ END IsOpenArray;
 PROCEDURE SamePars(p1, p2: B.Ident): BOOLEAN;
 	RETURN (p1 = NIL) & (p2 = NIL)
 	OR (p1 # NIL) & (p2 # NIL)
-		& (p1.obj(B.Var).ref = p2.obj(B.Var).ref)
-		& (p1.obj(B.Var).ronly = p2.obj(B.Var).ronly)
+		& (p1.obj(B.Par).varpar = p2.obj(B.Par).varpar)
 		& ((p1.obj.type = p2.obj.type)
 			OR (p1.obj.type.form = B.tArray) & (p2.obj.type.form = B.tArray)
 				& (p1.obj.type.len < 0) & (p2.obj.type.len < 0)
@@ -153,12 +152,12 @@ BEGIN
 	END
 END CheckVar;
 
-PROCEDURE CheckPar(fpar: B.Var; x: B.Object);
+PROCEDURE CheckPar(fpar: B.Par; x: B.Object);
 	VAR xtype, ftype: B.Type; xform, fform: INTEGER;
 BEGIN xtype := x.type; ftype := fpar.type;
-	IF ~fpar.ref THEN
+	IF ~fpar.varpar THEN
 		IF ~CompTypes(ftype, xtype) THEN Mark('invalid type') END
-	ELSIF fpar.ref THEN
+	ELSIF fpar.varpar THEN
 		CheckVar(x, fpar.ronly); xform := xtype.form; fform := ftype.form;
 		IF (xtype = ftype)
 		OR (fform = B.tRec) & (xform = B.tRec) & IsExt(xtype, ftype)
@@ -276,7 +275,7 @@ PROCEDURE Call(x: B.Object): B.Node;
 	PROCEDURE Parameter(VAR last: B.Node; fpar: B.Ident);
 		VAR y: B.Object; par: B.Node;
 	BEGIN y := expression0();
-		IF fpar # NIL THEN CheckPar(fpar.obj(B.Var), y) END;
+		IF fpar # NIL THEN CheckPar(fpar.obj(B.Par), y) END;
 		par := NewNode(S.par, y, NIL); last.right := par; last := par
 	END Parameter;
 		
@@ -1030,7 +1029,7 @@ END type;
 
 PROCEDURE DeclarationSequence(parentProc: B.Proc);
 	VAR first, ident, par: B.Ident; x: B.Object; tp: B.Type;
-		proc: B.Proc; varobj: B.Var; statseq: B.Node;
+		proc: B.Proc; parobj: B.Par; statseq: B.Node;
 		undef, prev: UndefPtrList;
 BEGIN
 	IF sym = S.const THEN GetSym;
@@ -1098,8 +1097,8 @@ BEGIN
 		IF sym = S.lparen THEN FormalParameters(tp) END; Check0(S.semicolon);
 		B.OpenScope; B.IncLev(1); par := tp.fields;
 		WHILE par # NIL DO
-			ident := NewIdent(par.name); NEW(varobj); ident.obj := varobj;
-			varobj^ := par.obj(B.Var)^; par := par.next
+			ident := NewIdent(par.name); NEW(parobj); ident.obj := parobj;
+			parobj^ := par.obj(B.Par)^; par := par.next
 		END;
 		ident := curProcIdent; DeclarationSequence(proc);
 		curProcIdent := ident; proc.decl := B.topScope.first;
