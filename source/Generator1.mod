@@ -673,32 +673,70 @@ PROCEDURE SymToOp(sym: INTEGER): INTEGER;
 	RETURN sym
 END SymToOp;
 
-PROCEDURE MakeNode(x: B.Object): Node;
-	VAR node: Node; sym, val: INTEGER;
-BEGIN
-	IF x = NIL THEN node := NIL
-	ELSE NEW(node);
-		node.type := x.type; node.mustUseRegs := {}; node.ref := FALSE;
-		IF x IS B.Const THEN
-			val := x(B.Const).val; node.mode := mImm; node.a := val
-		ELSIF x IS B.Var THEN
-			node.a := x(B.Var).adr;
-			IF x(B.Var).lev = 0 THEN node.mode := mIP
-			ELSIF x(B.Var).lev > 0 THEN
-				node.mode := mSP; node.ref := x(B.Var).ref
-			ELSIF x(B.Var).lev < -1 THEN node.mode := mIP; node.ref := TRUE
+PROCEDURE NewNode(obj: B.Object): Node;
+	VAR node: Node;
+BEGIN NEW(node);
+	node.type := obj.type; node.mustUseRegs := {}; node.ref := FALSE;
+	RETURN node
+END NewNode;
+
+PROCEDURE MakeNode(obj: B.Object): Node;
+	VAR node, par: Node; sym, val, i: INTEGER;
+	
+	PROCEDURE MakeParNode(obj: B.Object; fpar: B.Par; parAdr: INTEGER);
+		VAR par: Node; parSize: INTEGER; parobj: B.Par;
+	BEGIN
+		IF obj = NIL THEN par := NIL
+		ELSE par := NewNode(obj);
+			ASSERT(obj(B.Node).op = S.par); par.op := SymToOp(S.par);
+			par.a := parAdr; par.type := fpar.type; par.ref := fpar.varpar;
+			par.x := MakeNode(obj(B.Node).left);
+			IF fpar.varpar & (fpar.type.form = B.tRec)
+			OR (fpar.type.form = B.tArray) & (fpar.type.len < 0)
+			THEN parSize := 16
+			ELSE parSize := 8
+			END;
+			WHILE parSize > 0 DO
+				IF parAdr = 0 THEN INCL(node.mustUseRegs, reg_C)
+				ELSIF parAdr = 8 THEN INCL(node.mustUseRegs, reg_D)
+				ELSIF parAdr = 16 THEN INCL(node.mustUseRegs, reg_R8)
+				ELSIF parAdr = 24 THEN INCL(node.mustUseRegs, reg_R9)
+				END;
+				DEC(parSize, 8); INC(parAdr, 8)
+			END;
+			IF fpar.ident.next # NIL THEN
+				par.y := MakeNode(obj(B.Node).right, 
+			ELSE par.y := NIL
+			END
+		END;
+		RETURN par
+	END MakeParNode;
+	
+BEGIN (* MakeNode *)
+	IF obj = NIL THEN node := NIL
+	ELSE node := NewNode(obj);
+		IF obj IS B.Const THEN
+			val := obj(B.Const).val; node.mode := mImm; node.a := val
+		ELSIF obj IS B.Var THEN
+			node.a := obj(B.Var).adr;
+			IF obj(B.Var).lev = 0 THEN node.mode := mIP
+			ELSIF obj(B.Var).lev > 0 THEN
+				node.mode := mSP; node.ref := obj(B.Var).ref
+			ELSIF obj(B.Var).lev < -1 THEN node.mode := mIP; node.ref := TRUE
 			ELSE ASSERT(FALSE);
 			END
-		ELSIF x IS B.Proc THEN
-			node.mode := mProc; node.a := x(B.Proc).adr;
-			node.ref := x(B.Proc).lev < -1
-		ELSIF x.class = B.cType THEN
-			node.mode := mType; node.a := x.type.adr;
-			node.ref := x.type.lev < -1
-		ELSIF x IS B.Node THEN
-			sym := x(B.Node).op; node.op := SymToOp(sym);
-			node.x := MakeNode(x(B.Node).left);
-			node.y := MakeNode(x(B.Node).right);
+		ELSIF obj IS B.Proc THEN
+			node.mode := mProc; node.a := obj(B.Proc).adr;
+			node.ref := obj(B.Proc).lev < -1
+		ELSIF obj.class = B.cType THEN
+			node.mode := mType; node.a := obj.type.adr;
+			node.ref := obj.type.lev < -1
+		ELSIF obj IS B.Node THEN
+			sym := obj(B.Node).op; node.op := SymToOp(sym);
+			node.x := MakeNode(obj(B.Node).left);
+			IF node.op # S.call THEN node.y := MakeNode(obj(B.Node).right)
+			ELSE node.y := MakeParNode(obj(B.Node).right, 0)
+			END;
 			IF node.x # NIL THEN
 				node.mustUseRegs := node.mustUseRegs + node.x.mustUseRegs
 			END;
@@ -764,8 +802,13 @@ BEGIN
 					node.mode := node.x.mode; node.ref := node.x.ref
 				ELSE LoadVar(node.y); node.mode := mRegI
 				END
-			ELSIF sym = S.par THEN
-				IF 
+			ELSIF sym = S.call THEN
+				par := node.y; i := 0;
+				WHILE par # NIL DO par.a := i;
+					IF i = 0 THEN INCL(node.mustUseRegs, reg_C)
+					ELSIF i = 8 THEN INCL(node.mustUseRegs, reg_D)
+					ELSIF i = 8 THEN INCL(node.mustUseRegs, reg_D)
+				END
 			END
 		ELSE ASSERT(FALSE)
 		END

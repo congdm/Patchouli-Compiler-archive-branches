@@ -41,7 +41,7 @@ TYPE
 		adr*, expno*, lev*: INTEGER; ronly*: BOOLEAN
 	END;
 	Par* = POINTER TO EXTENSIBLE RECORD (Var)
-		varpar*: BOOLEAN; no: INTEGER
+		varpar*: BOOLEAN
 	END;
 	Proc* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
 		adr*, expno*, lev*, locblksize*: INTEGER;
@@ -159,7 +159,7 @@ PROCEDURE NewPar*(proc, tp: Type; varpar: BOOLEAN): Par;
 BEGIN
 	NEW(p); p.class := cVar;
 	p.type := tp; p.lev := curLev;
-	p.varpar := varpar; INC(proc.nfpar); p.no := proc.nfpar;
+	p.varpar := varpar; INC(proc.nfpar);
 	p.ronly := ~varpar & (tp.form IN {B.tArray, B.tRec});
 	RETURN p
 END NewPar;
