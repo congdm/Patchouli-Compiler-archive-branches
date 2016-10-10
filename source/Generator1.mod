@@ -89,7 +89,7 @@ TYPE
 	
 	Node = POINTER TO RECORD
 		mode, op, r, rm: BYTE; ref: BOOLEAN;
-		a, b: INTEGER; mustUseRegs: SET; type: B.Type;
+		a, b: INTEGER; usedRegs, curRegs: SET; type: B.Type;
 		x, y, next, fLink, tLink: Node
 	END
 	
@@ -676,12 +676,12 @@ END SymToOp;
 PROCEDURE NewNode(obj: B.Object): Node;
 	VAR node: Node;
 BEGIN NEW(node);
-	node.type := obj.type; node.mustUseRegs := {}; node.ref := FALSE;
+	node.type := obj.type; node.usedRegs := {}; node.ref := FALSE;
 	RETURN node
 END NewNode;
 
 PROCEDURE MakeNode(obj: B.Object): Node;
-	VAR node, par: Node; sym, val, i: INTEGER;
+	VAR node, par: Node; fpar: B.Par; sym, val, i: INTEGER;
 	
 	PROCEDURE MakeParNode(obj: B.Object; fpar: B.Par; parAdr: INTEGER);
 		VAR par: Node; parSize: INTEGER; parobj: B.Par;
@@ -697,15 +697,18 @@ PROCEDURE MakeNode(obj: B.Object): Node;
 			ELSE parSize := 8
 			END;
 			WHILE parSize > 0 DO
-				IF parAdr = 0 THEN INCL(node.mustUseRegs, reg_C)
-				ELSIF parAdr = 8 THEN INCL(node.mustUseRegs, reg_D)
-				ELSIF parAdr = 16 THEN INCL(node.mustUseRegs, reg_R8)
-				ELSIF parAdr = 24 THEN INCL(node.mustUseRegs, reg_R9)
+				IF parAdr = 0 THEN INCL(node.usedRegs, reg_C)
+				ELSIF parAdr = 8 THEN INCL(node.usedRegs, reg_D)
+				ELSIF parAdr = 16 THEN INCL(node.usedRegs, reg_R8)
+				ELSIF parAdr = 24 THEN INCL(node.usedRegs, reg_R9)
 				END;
 				DEC(parSize, 8); INC(parAdr, 8)
 			END;
 			IF fpar.ident.next # NIL THEN
-				par.y := MakeNode(obj(B.Node).right, 
+				IF fpar.ident.next = NIL THEN par.y := NIL
+				ELSE fpar := fpar.ident.next.obj(B.Par);
+					par.y := MakeParNode(obj(B.Node).right, fpar, parAdr)
+				END
 			ELSE par.y := NIL
 			END
 		END;
@@ -735,13 +738,16 @@ BEGIN (* MakeNode *)
 			sym := obj(B.Node).op; node.op := SymToOp(sym);
 			node.x := MakeNode(obj(B.Node).left);
 			IF node.op # S.call THEN node.y := MakeNode(obj(B.Node).right)
-			ELSE node.y := MakeParNode(obj(B.Node).right, 0)
+			ELSIF obj(B.Node).right # NIL THEN
+				fpar := node.x.type.fields.first;
+				node.y := MakeParNode(obj(B.Node).right, fpar, 0)
+			ELSE node.y := NIL
 			END;
 			IF node.x # NIL THEN
-				node.mustUseRegs := node.mustUseRegs + node.x.mustUseRegs
+				node.usedRegs := node.usedRegs + node.x.usedRegs
 			END;
 			IF node.y # NIL THEN
-				node.mustUseRegs := node.mustUseRegs + node.y.mustUseRegs
+				node.usedRegs := node.usedRegs + node.y.usedRegs
 			END;
 			IF (sym >= S.times) & (sym <= S.mod)
 			OR (sym = S.plus) OR (sym = S.minus) THEN
@@ -749,15 +755,15 @@ BEGIN (* MakeNode *)
 				IF pn.type # B.realType THEN node.mode := mReg;
 					IF (sym = S.div) OR (sym = S.mod) THEN
 						IF (node.y.mode # mImm) OR (log2(node.y.a) < 0) THEN 
-							INCL(node.mustUseRegs, reg_A);
-							INCL(node.mustUseRegs, reg_D)
+							INCL(node.usedRegs, reg_A);
+							INCL(node.usedRegs, reg_D)
 						ELSIF log2(node.y.a) >= 2 THEN
-							INCL(node.mustUseRegs, reg_C)
+							INCL(node.usedRegs, reg_C)
 						END
 					ELSIF sym = S.times THEN
 						IF (node.y.mode = mImm) & (log2(node.y.a) >= 2)
 						OR (node.x.mode = mImm) & (log2(node.x.a) >= 2)
-						THEN INCL(node.mustUseRegs, reg_C)
+						THEN INCL(node.usedRegs, reg_C)
 						END
 					END
 				ELSE node.mode := mXReg
@@ -803,12 +809,6 @@ BEGIN (* MakeNode *)
 				ELSE LoadVar(node.y); node.mode := mRegI
 				END
 			ELSIF sym = S.call THEN
-				par := node.y; i := 0;
-				WHILE par # NIL DO par.a := i;
-					IF i = 0 THEN INCL(node.mustUseRegs, reg_C)
-					ELSIF i = 8 THEN INCL(node.mustUseRegs, reg_D)
-					ELSIF i = 8 THEN INCL(node.mustUseRegs, reg_D)
-				END
 			END
 		ELSE ASSERT(FALSE)
 		END
@@ -816,10 +816,33 @@ BEGIN (* MakeNode *)
 	RETURN node
 END MakeNode;
 
-PROCEDURE Pass1(node: Node; usedRegs: SET; );
+PROCEDURE Pass1(node: Node; resultReg: BYTE);
+	VAR xReg, yReg: INTEGER;
 BEGIN
-	IF node.op = S.par THEN
-		IF node.x & 
+	IF node.op = S.div THEN
+		ASSERT(node.curRegs * {reg_A, reg_D} = {});
+		ASSERT(node.x.mode = mReg); ASSERT(node.y.mode = mReg);
+		node.x.curRegs := node.curRegs;
+		IF ~(reg_A IN node.y.usedRegs) THEN xReg := reg_A; Pass1(node.x, xReg)
+		ELSE xReg := AllocReg(node.curRegs + node.y.usedRegs);
+			Pass1(node.x, xReg);
+			IF node.x.r # xReg THEN
+				IF node.x.r IN node.y.usedReg THEN (* Move *)
+				ELSE xReg := node.x.r1
+				END
+			END;
+			node.usedRegs := node.usedRegs + node.x.usedRegs
+		END;
+		INCL(node.curRegs, xReg); INCL(node.usedRegs, xReg);
+		node.y.curRegs := node.curRegs;
+		yReg := AllocReg(node.curRegs + {reg_A, reg_D});
+		Pass1(node.y, yReg);
+		IF node.y.r # yReg THEN
+			IF node.y.r IN {reg_A, reg_D} THEN (* Move *)
+			ELSE yReg := node.y.r
+			END
+		END;
+		node.usedRegs 
 	END
 END Pass1;
 
