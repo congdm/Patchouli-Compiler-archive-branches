@@ -105,6 +105,8 @@ VAR
 	varSize, staticSize: INTEGER;
 	impList: B.Ident;
 	
+	parPassingReg: ARRAY 4 OF INTEGER;
+	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 (* Machine code emitter *)
@@ -680,28 +682,35 @@ BEGIN NEW(node);
 	RETURN node
 END NewNode;
 
+PROCEDURE UpdateUsedRegs(node: Node);
+BEGIN
+	IF node.x # NIL THEN node.usedRegs := node.usedRegs + node.x.usedRegs END;
+	IF node.y # NIL THEN node.usedRegs := node.usedRegs + node.y.usedRegs END
+END UpdateUsedRegs;
+
+PROCEDURE ParSize(fpar: B.Par): INTEGER;
+	VAR parSize: INTEGER;
+BEGIN
+	IF fpar.varpar & (fpar.type.form = B.tRec)
+	OR (fpar.type.form = B.tArray) & (fpar.type.len < 0)
+	THEN parSize := 16 ELSE parSize := 8
+	END;
+	RETURN parSize
+END ParSize;
+
 PROCEDURE MakeNode(obj: B.Object): Node;
 	VAR node, par: Node; fpar: B.Par; sym, val, i: INTEGER;
 	
 	PROCEDURE MakeParNode(obj: B.Object; fpar: B.Par; parAdr: INTEGER);
-		VAR par: Node; parSize: INTEGER; parobj: B.Par;
+		VAR par: Node; parSize, i: INTEGER; parobj: B.Par;
 	BEGIN
 		IF obj = NIL THEN par := NIL
 		ELSE par := NewNode(obj);
 			ASSERT(obj(B.Node).op = S.par); par.op := SymToOp(S.par);
 			par.a := parAdr; par.type := fpar.type; par.ref := fpar.varpar;
-			par.x := MakeNode(obj(B.Node).left);
-			IF fpar.varpar & (fpar.type.form = B.tRec)
-			OR (fpar.type.form = B.tArray) & (fpar.type.len < 0)
-			THEN parSize := 16
-			ELSE parSize := 8
-			END;
-			WHILE parSize > 0 DO
-				IF parAdr = 0 THEN INCL(node.usedRegs, reg_C)
-				ELSIF parAdr = 8 THEN INCL(node.usedRegs, reg_D)
-				ELSIF parAdr = 16 THEN INCL(node.usedRegs, reg_R8)
-				ELSIF parAdr = 24 THEN INCL(node.usedRegs, reg_R9)
-				END;
+			parSize := ParSize(fpar); par.x := MakeNode(obj(B.Node).left);
+			WHILE parSize > 0 DO i := parAdr DIV 8;
+				IF i < 4 THEN INCL(node.usedRegs, parPassingReg[i]) END;
 				DEC(parSize, 8); INC(parAdr, 8)
 			END;
 			IF fpar.ident.next # NIL THEN
@@ -717,101 +726,105 @@ PROCEDURE MakeNode(obj: B.Object): Node;
 	
 BEGIN (* MakeNode *)
 	IF obj = NIL THEN node := NIL
-	ELSE node := NewNode(obj);
-		IF obj IS B.Const THEN
-			val := obj(B.Const).val; node.mode := mImm; node.a := val
-		ELSIF obj IS B.Var THEN
-			node.a := obj(B.Var).adr;
-			IF obj(B.Var).lev = 0 THEN node.mode := mIP
-			ELSIF obj(B.Var).lev > 0 THEN
-				node.mode := mSP; node.ref := obj(B.Var).ref
-			ELSIF obj(B.Var).lev < -1 THEN node.mode := mIP; node.ref := TRUE
-			ELSE ASSERT(FALSE);
-			END
-		ELSIF obj IS B.Proc THEN
-			node.mode := mProc; node.a := obj(B.Proc).adr;
-			node.ref := obj(B.Proc).lev < -1
-		ELSIF obj.class = B.cType THEN
-			node.mode := mType; node.a := obj.type.adr;
-			node.ref := obj.type.lev < -1
-		ELSIF obj IS B.Node THEN
-			sym := obj(B.Node).op; node.op := SymToOp(sym);
-			node.x := MakeNode(obj(B.Node).left);
-			IF node.op # S.call THEN node.y := MakeNode(obj(B.Node).right)
-			ELSIF obj(B.Node).right # NIL THEN
-				fpar := node.x.type.fields.first;
-				node.y := MakeParNode(obj(B.Node).right, fpar, 0)
-			ELSE node.y := NIL
-			END;
-			IF node.x # NIL THEN
-				node.usedRegs := node.usedRegs + node.x.usedRegs
-			END;
-			IF node.y # NIL THEN
-				node.usedRegs := node.usedRegs + node.y.usedRegs
-			END;
-			IF (sym >= S.times) & (sym <= S.mod)
-			OR (sym = S.plus) OR (sym = S.minus) THEN
-				LoadVar(node.x); LoadVar(node.y);
-				IF pn.type # B.realType THEN node.mode := mReg;
-					IF (sym = S.div) OR (sym = S.mod) THEN
-						IF (node.y.mode # mImm) OR (log2(node.y.a) < 0) THEN 
-							INCL(node.usedRegs, reg_A);
-							INCL(node.usedRegs, reg_D)
-						ELSIF log2(node.y.a) >= 2 THEN
-							INCL(node.usedRegs, reg_C)
-						END
-					ELSIF sym = S.times THEN
-						IF (node.y.mode = mImm) & (log2(node.y.a) >= 2)
-						OR (node.x.mode = mImm) & (log2(node.x.a) >= 2)
-						THEN INCL(node.usedRegs, reg_C)
+	ELSIF obj IS B.Const THEN
+		node := NewNode(obj); node.op := S.null;
+		val := obj(B.Const).val; node.mode := mImm; node.a := val
+	ELSIF obj IS B.Var THEN
+		node := NewNode(obj); node.op := S.null; node.a := obj(B.Var).adr;
+		IF obj(B.Var).lev = 0 THEN node.mode := mIP
+		ELSIF obj(B.Var).lev > 0 THEN
+			node.mode := mSP; node.ref := obj(B.Var).ref
+		ELSIF obj(B.Var).lev < -1 THEN node.mode := mIP; node.ref := TRUE
+		ELSE ASSERT(FALSE);
+		END
+	ELSIF obj IS B.Proc THEN
+		node := NewNode(obj); node.op := S.null;
+		node.mode := mProc; node.a := obj(B.Proc).adr;
+		node.ref := obj(B.Proc).lev < -1
+	ELSIF obj.class = B.cType THEN
+		node := NewNode(obj); node.op := S.null;
+		node.mode := mType; node.a := obj.type.adr;
+		node.ref := obj.type.lev < -1
+	ELSIF obj IS B.Node THEN
+		node := NewNode(obj); sym := obj(B.Node).op; node.op := SymToOp(sym);
+		node.x := MakeNode(obj(B.Node).left);
+		IF node.op # S.call THEN node.y := MakeNode(obj(B.Node).right)
+		ELSIF obj(B.Node).right # NIL THEN
+			fpar := node.x.type.fields.first;
+			node.y := MakeParNode(obj(B.Node).right, fpar, 0)
+		ELSE node.y := NIL
+		END;
+		UpdateUsedRegs(node);
+		IF (sym >= S.times) & (sym <= S.mod)
+		OR (sym = S.plus) OR (sym = S.minus) THEN
+			LoadVar(node.x); LoadVar(node.y);
+			IF ((sym = S.div) OR (sym = S.mod) OR (sym = S.times))
+				& (pn.type.form = B.tInt)
+			THEN node.mode := mReg;
+				IF (sym = S.div) OR (sym = S.mod) THEN Load(x);
+					IF (node.y.mode # mImm) OR (log2(node.y.a) < 0) THEN
+						Load(y); INCL(node.usedRegs, reg_A);
+						INCL(node.usedRegs, reg_D)
+					ELSIF node.y.a = 1 THEN node := node.x
+					ELSE node.op := opShift; node.y.a := log2(node.y.a)				
+					END
+				ELSIF sym = S.times THEN
+					IF node.y.mode = mImm THEN
+						IF node.y.a = 0 THEN
+							node.op := S.null; node.mode := mImm; node.a := 0
+						ELSIF node.y.a = 1 THEN node := node.x
+						ELSIF log2(node.y.a) > 0 THEN
+							node.op := opShift; node.y.a := log2(node.y.a)
+						ELSIF (node.y.a > 7FFFFFFFH) OR (node.y.a < -80000000H) THEN
+							Load(y)
 						END
 					END
-				ELSE node.mode := mXReg
 				END
-			ELSIF (sym = S.and) OR (sym = S.or) THEN
-				ToCond(node.x); ToCond(node.y); node.mode := mCond;
-				IF sym = S.and THEN
-					node.fLink := merged(node.x.fLink, node.y.fLink);
-					node.tLink := node.y.tLink
-				ELSE
-					node.tLink := merged(node.x.tLink, node.y.tLink);
-					node.fLink := node.y.fLink
-				END
-			ELSIF (sym >= S.eql) & (sym <= S.geq) THEN
-				IF (node.y.type = B.strType) & (node.x.type = B.charType)
-				THEN LoadVar(node.x); StrToChar(node.y)
-				ELSIF (node.x.type = B.strType) & (node.y.type = B.charType)
-				THEN LoadVar(node.y); StrToChar(node.x)
-				ELSIF ~(node.y.type.form IN {B.tArray, B.tStr}) THEN
-					LoadVar(node.x); LoadVar(node.y)
-				ELSE RefToRegI(node.x); RefToRegI(node.y)
-				END;
-				node.mode := mCond; node.fLink := NIL; node.tLink := NIL
-			ELSIF sym = S.is THEN
-				LoadTypeTag(node.x); LoadTypeDesc(node.y);
-				node.mode := mCond; node.fLink := NIL; node.tLink := NIL
-			ELSIF sym = S.in THEN
-				LoadVar(node.x); LoadVar(node.y);
-				node.mode := mCond; node.fLink := NIL; node.tLink := NIL
-			ELSIF sym = S.arrow THEN
-				LoadVar(node.x); node.mode := mRegI
-			ELSIF sym = S.period THEN
-				node.mode := node.x.mode; node.ref := node.x.ref
-			ELSIF sym = S.not THEN
-				ToCond(node.x); node.mode := mCond;
-				node.fLink := node.x.tLink; node.tLink := node.x.fLink
-			ELSIF sym = S.lparen THEN
-				LoadTypeDesc(node.y);
-				node.mode := node.x.mode; node.ref := node.x.ref
-			ELSIF sym = S.lbrak THEN
-				IF node.y.mode = mImm THEN
-					node.mode := node.x.mode; node.ref := node.x.ref
-				ELSE LoadVar(node.y); node.mode := mRegI
-				END
-			ELSIF sym = S.call THEN
+			ELSIF node.mode := mXReg
 			END
-		ELSE ASSERT(FALSE)
+		ELSIF (sym = S.and) OR (sym = S.or) THEN
+			ToCond(node.x); ToCond(node.y); node.mode := mCond;
+			IF sym = S.and THEN
+				node.fLink := merged(node.x.fLink, node.y.fLink);
+				node.tLink := node.y.tLink
+			ELSE
+				node.tLink := merged(node.x.tLink, node.y.tLink);
+				node.fLink := node.y.fLink
+			END
+		ELSIF (sym >= S.eql) & (sym <= S.geq) THEN
+			IF (node.y.type = B.strType) & (node.x.type = B.charType)
+			THEN LoadVar(node.x); StrToChar(node.y)
+			ELSIF (node.x.type = B.strType) & (node.y.type = B.charType)
+			THEN LoadVar(node.y); StrToChar(node.x)
+			ELSIF ~(node.y.type.form IN {B.tArray, B.tStr}) THEN
+				LoadVar(node.x); LoadVar(node.y)
+			ELSE RefToRegI(node.x); RefToRegI(node.y)
+			END;
+			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
+		ELSIF sym = S.is THEN
+			LoadTypeTag(node.x); LoadTypeDesc(node.y);
+			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
+		ELSIF sym = S.in THEN
+			LoadVar(node.x); LoadVar(node.y);
+			node.mode := mCond; node.fLink := NIL; node.tLink := NIL
+		ELSIF sym = S.arrow THEN
+			LoadVar(node.x); node.mode := mRegI
+		ELSIF sym = S.period THEN
+			node.mode := node.x.mode; node.ref := node.x.ref
+		ELSIF sym = S.not THEN
+			ToCond(node.x); node.mode := mCond;
+			node.fLink := node.x.tLink; node.tLink := node.x.fLink
+		ELSIF sym = S.lparen THEN
+			LoadTypeDesc(node.y);
+			node.mode := node.x.mode; node.ref := node.x.ref
+		ELSIF sym = S.lbrak THEN
+			IF node.y.mode = mImm THEN
+				node.mode := node.x.mode; node.ref := node.x.ref
+			ELSE LoadVar(node.y); node.mode := mRegI
+			END
+		ELSIF sym = S.call THEN
 		END
+	ELSE ASSERT(FALSE)
 	END;
 	RETURN node
 END MakeNode;
@@ -865,4 +878,7 @@ BEGIN
 	B.nilType.size := 8; B.nilType.align := 8
 END Init;
 
+BEGIN
+	parPassingReg[0] := reg_C; parPassingReg[1] := reg_D;
+	parPassingReg[2] := reg_R8; parPassingReg[3] := reg_R9
 END Generator1.
