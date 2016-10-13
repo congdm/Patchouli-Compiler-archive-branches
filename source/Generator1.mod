@@ -671,10 +671,6 @@ PROCEDURE ToCond(VAR x: Node);
 BEGIN
 END ToCond;
 
-PROCEDURE SymToOp(sym: INTEGER): INTEGER;
-	RETURN sym
-END SymToOp;
-
 PROCEDURE NewNode(obj: B.Object): Node;
 	VAR node: Node;
 BEGIN NEW(node);
@@ -698,8 +694,50 @@ BEGIN
 	RETURN parSize
 END ParSize;
 
+PROCEDURE BigConst(a: INTEGER; unsigned: BOOLEAN): BOOLEAN;
+	RETURN unsigned & (a >= -80000000H) & (a < 100000000H)
+	OR (a >= -80000000H) & (a < 80000000H)
+END BigConst;
+
+PROCEDURE MakeIntOpNode(node: Node);
+	VAR op: INTEGER; temp: Node;
+BEGIN op := node.op; node.mode := mReg;
+	IF (op = S.div) OR (op = S.mod) THEN Load(node.x);
+		IF (node.y.mode # mImm) OR (log2(node.y.a) < 0) THEN
+			Load(node.y); INCL(node.usedRegs, reg_A);
+			INCL(node.usedRegs, reg_D)
+		ELSIF node.y.a = 1 THEN node := node.x
+		ELSE node.op := opShift; node.y.a := log2(node.y.a)				
+		END
+	ELSIF op = S.times THEN
+		IF node.x.mode = mImm THEN
+			temp := node.x; node.x := node.y; node.y := temp
+		END;
+		IF node.y.mode = mImm THEN
+			IF node.y.a = 0 THEN
+				node.op := S.null; node.mode := mImm; node.a := 0
+			ELSIF node.y.a = 1 THEN node := node.x
+			ELSIF log2(node.y.a) > 0 THEN
+				node.op := opShift; node.y.a := log2(node.y.a)
+			ELSIF BigConst(node.y.a, FALSE) THEN Load(node.y)
+			END
+		END
+	ELSIF op = S.add THEN
+		IF node.x.mode = mImm THEN
+			temp := node.x; node.x := node.y; node.y := temp
+		END;
+		IF (node.y.mode = mImm) & BigConst(node.y.a, FALSE) THEN
+			Load(node.y)
+		END
+	ELSIF op = S.minus THEN Load(node.x);
+		IF (node.y.mode = mImm) & BigConst(node.y.a, FALSE) THEN
+			Load(node.y)
+		END
+	END
+END MakeIntOpNode;
+
 PROCEDURE MakeNode(obj: B.Object): Node;
-	VAR node, par: Node; fpar: B.Par; sym, val, i: INTEGER;
+	VAR node, par, temp: Node; fpar: B.Par; sym, val, i: INTEGER;
 	
 	PROCEDURE MakeParNode(obj: B.Object; fpar: B.Par; parAdr: INTEGER);
 		VAR par: Node; parSize, i: INTEGER; parobj: B.Par;
@@ -746,7 +784,7 @@ BEGIN (* MakeNode *)
 		node.mode := mType; node.a := obj.type.adr;
 		node.ref := obj.type.lev < -1
 	ELSIF obj IS B.Node THEN
-		node := NewNode(obj); sym := obj(B.Node).op; node.op := SymToOp(sym);
+		node := NewNode(obj); sym := obj(B.Node).op; node.op := sym;
 		node.x := MakeNode(obj(B.Node).left);
 		IF node.op # S.call THEN node.y := MakeNode(obj(B.Node).right)
 		ELSIF obj(B.Node).right # NIL THEN
@@ -758,28 +796,10 @@ BEGIN (* MakeNode *)
 		IF (sym >= S.times) & (sym <= S.mod)
 		OR (sym = S.plus) OR (sym = S.minus) THEN
 			LoadVar(node.x); LoadVar(node.y);
-			IF ((sym = S.div) OR (sym = S.mod) OR (sym = S.times))
-				& (pn.type.form = B.tInt)
-			THEN node.mode := mReg;
-				IF (sym = S.div) OR (sym = S.mod) THEN Load(x);
-					IF (node.y.mode # mImm) OR (log2(node.y.a) < 0) THEN
-						Load(y); INCL(node.usedRegs, reg_A);
-						INCL(node.usedRegs, reg_D)
-					ELSIF node.y.a = 1 THEN node := node.x
-					ELSE node.op := opShift; node.y.a := log2(node.y.a)				
-					END
-				ELSIF sym = S.times THEN
-					IF node.y.mode = mImm THEN
-						IF node.y.a = 0 THEN
-							node.op := S.null; node.mode := mImm; node.a := 0
-						ELSIF node.y.a = 1 THEN node := node.x
-						ELSIF log2(node.y.a) > 0 THEN
-							node.op := opShift; node.y.a := log2(node.y.a)
-						ELSIF (node.y.a > 7FFFFFFFH) OR (node.y.a < -80000000H) THEN
-							Load(y)
-						END
-					END
-				END
+			IF node.type.form = B.tInt THEN MakeIntOpNode(node)
+			ELSIF node.type.form # B.tReal THEN
+				IF (node.x.mode = mImm) & THEN
+				
 			ELSIF node.mode := mXReg
 			END
 		ELSIF (sym = S.and) OR (sym = S.or) THEN
