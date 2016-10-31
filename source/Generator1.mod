@@ -677,8 +677,39 @@ BEGIN
 	IF x.lev > 0 THEN x.mode := mSP
 	ELSIF x.lev = 0 THEN x.mode := mIP
 	ELSIF x.lev < -1 THEN x.mode := mIP; x.ref := TRUE
+	ELSIF x.lev > 0 THEN x.mode := mSP; x.ref := obj IS B.Par
+	ELSE ASSERT(FALSE)
 	END
 END Var1;
+
+PROCEDURE Proc1(obj: B.Proc): Node;
+	VAR x: Node;
+BEGIN
+	x := NewNode(obj); x.a := obj.adr; x.mode := mProc;
+	RETURN x
+END Proc1;
+
+PROCEDURE Node1(obj: B.Node): Node;
+	VAR node: Node;
+	
+	PROCEDURE NodeChild1(obj: B.Object): Node;
+		VAR x: Node;
+	BEGIN
+		IF obj = NIL THEN x := NIL
+		ELSIF obj IS B.Const THEN x := Const1(obj(B.Const))
+		ELSIF obj IS B.Var THEN x := Var1(obj(B.Var))
+		ELSIF obj IS B.Proc THEN x := Proc1(obj(B.Proc))
+		ELSIF obj IS B.Node THEN x := Node1(obj(B.Node))
+		ELSE ASSERT(FALSE)
+		END;
+		RETURN x
+	END NodeChild1;
+	
+BEGIN (* Node1 *)
+	node := NewNode(obj);
+	node.x := NodeChild1(obj.left); node.y := NodeChild1(obj.right);
+	RETURN node
+END Node1;
 
 PROCEDURE Pass1;
 BEGIN
