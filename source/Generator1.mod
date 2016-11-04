@@ -706,8 +706,20 @@ PROCEDURE Node1(obj: B.Node): Node;
 	END NodeChild1;
 	
 BEGIN (* Node1 *)
-	node := NewNode(obj);
+	node := NewNode(obj); node.op := obj.op;
 	node.x := NodeChild1(obj.left); node.y := NodeChild1(obj.right);
+	node.usedRegs := node.usedRegs + node.x.usedRegs;
+	IF node.y # NIL THEN node.usedRegs := node.usedRegs + node.y.usedRegs END;
+	IF (node.op = S.div) OR (node.op = S.mod) THEN
+		INCL(node.usedRegs, reg_A); INCL(node.usedRegs, reg_D)
+	ELSIF (node.op = S.upto)
+	OR (node.op = S.sproc) & (obj.left(B.SProc).id IN B.sfShifts)
+	THEN INCL(node.usedRegs, reg_C)
+	ELSIF (node.op = S.sproc) & (obj.left(B.SProc).id = B.spCOPY)
+	OR (node.op = S.becomes) & (node.x.type.form IN {B.tArray, B.tRec}) THEN
+		INCL(node.usedRegs, reg_SI); INCL(node.usedRegs, reg_DI);
+		INCL(node.usedRegs, reg_C)
+	END;
 	RETURN node
 END Node1;
 

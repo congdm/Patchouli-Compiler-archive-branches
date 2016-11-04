@@ -19,7 +19,18 @@ CONST
 	
 	typEql* = {tBool, tSet, tPtr, tProc, tNil};
 	typCmp* = {tInt, tReal, tChar, tStr};
-
+	
+	(* SProc id *)
+	spINC* = 0; spDEC* = 1; spINCL* = 2; spEXCL* = 3; spNEW* = 4;
+	spASSERT* = 5; spPACK* = 6; spUNPK* = 7;
+	sfABS* = 8; sfODD* = 9; sfLEN* = 10; sfLSL* = 11; sfASR* = 12;
+	sfROR* = 13; sfFLOOR* = 14; sfFLT* = 15; sfORD* = 16; sfCHR* = 17;
+	sfShifts* = {sfROR, sfLSL, sfASR};
+	
+	spGET* = 18; spPUT* = 19; spCOPY* = 20;
+	spLoadLibraryW* = 21; spGetProcAddress* = 22;
+	sfADR* = 23; sfSIZE* = 24; sfBIT* = 25; sfVAL* = 26;
+	
 TYPE
 	IdStr* = S.IdStr;
 	String* = S.Str;
@@ -55,7 +66,7 @@ TYPE
 		key*: ModuleKey; lev*, adr*: INTEGER;
 		first*: Ident; types*: TypeList
 	END;
-	SProc* = POINTER TO EXTENSIBLE RECORD (ObjDesc) id*: IdStr END;
+	SProc* = POINTER TO EXTENSIBLE RECORD (ObjDesc) id*: INTEGER END;
 	
 	IdentDesc* = RECORD
 		export*: BOOLEAN;
@@ -204,11 +215,11 @@ BEGIN
 	RETURN x
 END NewTypeObj;
 
-PROCEDURE NewSProc*(name: IdStr; cls: INTEGER): SProc;
+PROCEDURE NewSProc*(id, cls: INTEGER): SProc;
 	VAR x: SProc;
 BEGIN
 	NEW(x); x.class := cls;
-	x.id := name; x.type := noType;
+	x.id := id; x.type := noType;
 	RETURN x
 END NewSProc;
 
@@ -666,37 +677,37 @@ BEGIN
 	Enter(NewTypeObj(boolType), 'BOOLEAN');
 	Enter(NewTypeObj(charType), 'CHAR');
 	
-	Enter(NewSProc('INC', cSProc), 'INC');
-	Enter(NewSProc('DEC', cSProc), 'DEC');
-	Enter(NewSProc('INCL', cSProc), 'INCL');
-	Enter(NewSProc('EXCL', cSProc), 'EXCL');
-	Enter(NewSProc('NEW', cSProc), 'NEW');
-	Enter(NewSProc('ASSERT', cSProc), 'ASSERT');
-	Enter(NewSProc('PACK', cSProc), 'PACK');
-	Enter(NewSProc('UNPK', cSProc), 'UNPK');
+	Enter(NewSProc(spINC, cSProc), 'INC');
+	Enter(NewSProc(spDEC, cSProc), 'DEC');
+	Enter(NewSProc(spINCL, cSProc), 'INCL');
+	Enter(NewSProc(spEXCL, cSProc), 'EXCL');
+	Enter(NewSProc(spNEW, cSProc), 'NEW');
+	Enter(NewSProc(spASSERT, cSProc), 'ASSERT');
+	Enter(NewSProc(spPACK, cSProc), 'PACK');
+	Enter(NewSProc(spUNPK, cSProc), 'UNPK');
 	
-	Enter(NewSProc('ABS', cSFunc), 'ABS');
-	Enter(NewSProc('ODD', cSFunc), 'ODD');
-	Enter(NewSProc('LEN', cSFunc), 'LEN');
-	Enter(NewSProc('LSL', cSFunc), 'LSL');
-	Enter(NewSProc('ASR', cSFunc), 'ASR');
-	Enter(NewSProc('ROR', cSFunc), 'ROR');
-	Enter(NewSProc('FLOOR', cSFunc), 'FLOOR');
-	Enter(NewSProc('FLT', cSFunc), 'FLT');
-	Enter(NewSProc('ORD', cSFunc), 'ORD');
-	Enter(NewSProc('CHR', cSFunc), 'CHR');
+	Enter(NewSProc(sfABS, cSFunc), 'ABS');
+	Enter(NewSProc(sfODD, cSFunc), 'ODD');
+	Enter(NewSProc(sfLEN, cSFunc), 'LEN');
+	Enter(NewSProc(sfLSL, cSFunc), 'LSL');
+	Enter(NewSProc(sfASR, cSFunc), 'ASR');
+	Enter(NewSProc(sfROR, cSFunc), 'ROR');
+	Enter(NewSProc(sfFLOOR, cSFunc), 'FLOOR');
+	Enter(NewSProc(sfFLT, cSFunc), 'FLT');
+	Enter(NewSProc(sfORD, cSFunc), 'ORD');
+	Enter(NewSProc(sfCHR, cSFunc), 'CHR');
 	
 	OpenScope;
-	Enter(NewSProc('GET', cSProc), 'GET');
-	Enter(NewSProc('PUT', cSProc), 'PUT');
-	Enter(NewSProc('COPY', cSProc), 'COPY');
-	Enter(NewSProc('LoadLibraryW', cSProc), 'LoadLibraryW');
-	Enter(NewSProc('GetProcAddress', cSProc), 'GetProcAddress');
+	Enter(NewSProc(spGET, cSProc), 'GET');
+	Enter(NewSProc(spPUT, cSProc), 'PUT');
+	Enter(NewSProc(spCOPY, cSProc), 'COPY');
+	Enter(NewSProc(spLoadLibraryW, cSProc), 'LoadLibraryW');
+	Enter(NewSProc(spGetProcAddress, cSProc), 'GetProcAddress');
 	
-	Enter(NewSProc('ADR', cSFunc), 'ADR');
-	Enter(NewSProc('SIZE', cSFunc), 'SIZE');
-	Enter(NewSProc('BIT', cSFunc), 'BIT');
-	Enter(NewSProc('VAL', cSFunc), 'VAL');
+	Enter(NewSProc(sfADR, cSFunc), 'ADR');
+	Enter(NewSProc(sfSIZE, cSFunc), 'SIZE');
+	Enter(NewSProc(sfBIT, cSFunc), 'BIT');
+	Enter(NewSProc(sfVAL, cSFunc), 'VAL');
 	
 	Enter(NewTypeObj(byteType), 'BYTE');
 	systemScope := topScope; CloseScope; curLev := 0
