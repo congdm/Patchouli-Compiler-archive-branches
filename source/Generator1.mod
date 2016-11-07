@@ -57,7 +57,7 @@ CONST
 	CVTSS2SI = 2D0FF3H; CVTSI2SS = 2A0FF3H;
 	
 	mReg = 0; mXReg = 1; mImm = 2; mRegI = 3; mIP = 4; mSP = 5; mBP = 6;
-	mProc = 7; mType = 8;
+	mCond = 7; mProc = 8; mType = 9;
 	
 TYPE
 	Proc = POINTER TO RECORD
@@ -689,8 +689,21 @@ BEGIN
 	RETURN x
 END Proc1;
 
+PROCEDURE SetNodeMode1(node: Node);
+	VAR op: INTEGER;
+BEGIN op := node.op;
+	IF (op >= S.times) & (op <= S.or) THEN
+		IF node.type = B.realType THEN node.mode := mXReg
+		ELSIF (op = S.and) OR (op = S.or) THEN node.mode := mCond
+		ELSE node.mode := mReg
+		END
+	ELSIF (op >= S.eql) & (op <= S.is) THEN node.mode := mCond
+	ELSIF (op = S.period) OR (op = S.arrow) OR (op = S
+	END
+END SetNodeMode1;
+
 PROCEDURE Node1(obj: B.Node): Node;
-	VAR node: Node;
+	VAR node: Node; op: INTEGER;
 	
 	PROCEDURE NodeChild1(obj: B.Object): Node;
 		VAR x: Node;
@@ -706,20 +719,21 @@ PROCEDURE Node1(obj: B.Node): Node;
 	END NodeChild1;
 	
 BEGIN (* Node1 *)
-	node := NewNode(obj); node.op := obj.op;
+	node := NewNode(obj); node.op := obj.op; op := obj.op;
 	node.x := NodeChild1(obj.left); node.y := NodeChild1(obj.right);
 	node.usedRegs := node.usedRegs + node.x.usedRegs;
 	IF node.y # NIL THEN node.usedRegs := node.usedRegs + node.y.usedRegs END;
-	IF (node.op = S.div) OR (node.op = S.mod) THEN
+	IF (op = S.div) OR (op = S.mod) THEN
 		INCL(node.usedRegs, reg_A); INCL(node.usedRegs, reg_D)
-	ELSIF (node.op = S.upto)
-	OR (node.op = S.sproc) & (obj.left(B.SProc).id IN B.sfShifts)
+	ELSIF (op = S.upto)
+	OR (op = S.sproc) & (obj.left(B.SProc).id IN B.sfShifts)
 	THEN INCL(node.usedRegs, reg_C)
-	ELSIF (node.op = S.sproc) & (obj.left(B.SProc).id = B.spCOPY)
-	OR (node.op = S.becomes) & (node.x.type.form IN {B.tArray, B.tRec}) THEN
+	ELSIF (op = S.sproc) & (obj.left(B.SProc).id = B.spCOPY)
+	OR (op = S.becomes) & (node.x.type.form IN {B.tArray, B.tRec}) THEN
 		INCL(node.usedRegs, reg_SI); INCL(node.usedRegs, reg_DI);
 		INCL(node.usedRegs, reg_C)
 	END;
+	SetNodeMode1(node);
 	RETURN node
 END Node1;
 
