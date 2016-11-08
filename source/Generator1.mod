@@ -698,7 +698,18 @@ BEGIN op := node.op;
 		ELSE node.mode := mReg
 		END
 	ELSIF (op >= S.eql) & (op <= S.is) THEN node.mode := mCond
-	ELSIF (op = S.period) OR (op = S.arrow) OR (op = S
+	ELSIF op = S.arrow THEN node.mode := mRegI
+	ELSIF op = S.period THEN
+		IF node.x.ref THEN node.mode := node.x.mode; node.ref := TRUE
+		ELSE node.mode := mRegI
+		END
+	ELSIF op = S.lbrak THEN
+		IF node.x.ref & (node.y.mode = mImm) THEN
+			node.mode := node.x.mode; node.ref := TRUE
+		ELSE node.mode := mRegI
+		END
+	ELSIF op = S.lparen THEN node.mode := node.x.mode
+	ELSIF 
 	END
 END SetNodeMode1;
 
