@@ -143,10 +143,15 @@ PROCEDURE TypeTestable(x: B.Object): BOOLEAN;
 END TypeTestable;
 
 PROCEDURE CheckVar(x: B.Object; ronly: BOOLEAN);
+	VAR op: INTEGER;
 BEGIN
-	IF x.class = B.cVar THEN
+	IF x.class = B.cNode THEN op := x(B.Node).op END;
+	IF x IS B.Var THEN
 		IF ~ronly & x(B.Var).ronly THEN Mark('read only') END
-	ELSIF (x.class = B.cNode) & (x(B.Node).op = S.designator) THEN
+	ELSIF (x.class = B.cNode)
+		& ((op = S.arrow) OR (op = S.period)
+		OR (op = S.lparen) OR (op = S.lbrak)
+	THEN
 		IF ~ronly & x(B.Node).ronly THEN Mark('read only') END
 	ELSE Mark('not var')
 	END
@@ -215,14 +220,6 @@ BEGIN
 	z.left := x; z.right := y; z.ronly := FALSE;
 	RETURN z
 END NewNode;
-
-PROCEDURE NewDesignator(x: B.Object): B.Node;
-	VAR designator: B.Node;
-BEGIN
-	designator := NewNode(S.designator, x, NIL); designator.type := x.type;
-	IF x.class = B.cVar THEN designator.ronly := x(B.Var).ronly END;
-	RETURN designator
-END NewDesignator;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)

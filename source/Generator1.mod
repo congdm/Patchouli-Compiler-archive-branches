@@ -94,6 +94,9 @@ TYPE
 	END
 	
 VAR
+	(* forward decl *)
+	Node1_: PROCEDURE(obj: B.Object): B.Node;
+
 	code: ARRAY 32 OF BYTE; cpos: INTEGER;
 	procList, curProc: Proc;
 
@@ -709,42 +712,48 @@ BEGIN op := node.op;
 		ELSE node.mode := mRegI
 		END
 	ELSIF op = S.lparen THEN node.mode := node.x.mode
-	ELSIF 
 	END
 END SetNodeMode1;
 
+PROCEDURE NodeChild1(obj: B.Object): Node;
+	VAR x: Node;
+BEGIN
+	IF obj = NIL THEN x := NIL
+	ELSIF obj IS B.Const THEN x := Const1(obj(B.Const))
+	ELSIF obj IS B.Var THEN x := Var1(obj(B.Var))
+	ELSIF obj IS B.Proc THEN x := Proc1(obj(B.Proc))
+	ELSIF obj IS B.Node THEN x := Node1_(obj(B.Node))
+	ELSE ASSERT(FALSE)
+	END;
+	RETURN x
+END NodeChild1;
+
+PROCEDURE CallNode1(obj: B.Object): B.Node;
+	VAR call: B.Node;
+BEGIN
+	IF obj.left IS B.Proc THEN call.x := Proc1(obj.left(B.Proc))
+	ELSIF
+	RETURN call
+END CallNode1;
+
 PROCEDURE Node1(obj: B.Node): Node;
 	VAR node: Node; op: INTEGER;
-	
-	PROCEDURE NodeChild1(obj: B.Object): Node;
-		VAR x: Node;
-	BEGIN
-		IF obj = NIL THEN x := NIL
-		ELSIF obj IS B.Const THEN x := Const1(obj(B.Const))
-		ELSIF obj IS B.Var THEN x := Var1(obj(B.Var))
-		ELSIF obj IS B.Proc THEN x := Proc1(obj(B.Proc))
-		ELSIF obj IS B.Node THEN x := Node1(obj(B.Node))
-		ELSE ASSERT(FALSE)
+BEGIN
+	op := obj.op;
+	IF op = S.call THEN node := CallNode1(obj)
+	ELSIF op = S.sproc THEN node := SProcNode1(obj)
+	ELSE node := NewNode(obj); node.op := op;
+		node.x := NodeChild1(obj.left); node.y := NodeChild1(obj.right);
+		node.usedRegs := node.usedRegs + node.x.usedRegs;
+		IF node.y # NIL THEN
+			node.usedRegs := node.usedRegs + node.y.usedRegs
 		END;
-		RETURN x
-	END NodeChild1;
-	
-BEGIN (* Node1 *)
-	node := NewNode(obj); node.op := obj.op; op := obj.op;
-	node.x := NodeChild1(obj.left); node.y := NodeChild1(obj.right);
-	node.usedRegs := node.usedRegs + node.x.usedRegs;
-	IF node.y # NIL THEN node.usedRegs := node.usedRegs + node.y.usedRegs END;
-	IF (op = S.div) OR (op = S.mod) THEN
-		INCL(node.usedRegs, reg_A); INCL(node.usedRegs, reg_D)
-	ELSIF (op = S.upto)
-	OR (op = S.sproc) & (obj.left(B.SProc).id IN B.sfShifts)
-	THEN INCL(node.usedRegs, reg_C)
-	ELSIF (op = S.sproc) & (obj.left(B.SProc).id = B.spCOPY)
-	OR (op = S.becomes) & (node.x.type.form IN {B.tArray, B.tRec}) THEN
-		INCL(node.usedRegs, reg_SI); INCL(node.usedRegs, reg_DI);
-		INCL(node.usedRegs, reg_C)
+		IF (op = S.div) OR (op = S.mod) THEN
+			INCL(node.usedRegs, reg_A); INCL(node.usedRegs, reg_D)
+		ELSIF op = S.upto THEN INCL(node.usedRegs, reg_C)
+		END;
+		SetNodeMode1(node)
 	END;
-	SetNodeMode1(node);
 	RETURN node
 END Node1;
 
@@ -776,6 +785,7 @@ BEGIN
 END Init;
 
 BEGIN
+	Node1_ := Node1;
 	parPassingReg[0] := reg_C; parPassingReg[1] := reg_D;
 	parPassingReg[2] := reg_R8; parPassingReg[3] := reg_R9
 END Generator1.
