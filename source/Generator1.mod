@@ -729,10 +729,12 @@ BEGIN
 END NodeChild1;
 
 PROCEDURE CallNode1(obj: B.Object): B.Node;
-	VAR call: B.Node;
+	VAR call: B.Node; fpar: B.Ident; 
+		par: B.Node;
 BEGIN
-	IF obj.left IS B.Proc THEN call.x := Proc1(obj.left(B.Proc))
-	ELSIF
+	call := NewNode(obj); call.op := S.call;
+	call.x := NodeChild1(obj.left);
+	WHILE 
 	RETURN call
 END CallNode1;
 
