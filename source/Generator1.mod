@@ -728,13 +728,26 @@ BEGIN
 	RETURN x
 END NodeChild1;
 
+PROCEDURE ParNode1(obj: B.Object; fpar: B.Ident; adr: INTEGER): B.Node;
+	VAR par: B.Node;
+BEGIN
+	IF obj = NIL THEN par := NIL
+	ELSE par := NewNode(obj); par.x := NodeChild1(obj.left);
+		IF adr < 32 THEN
+			IF fpar.type # B.realType THEN
+			
+			END
+		END
+	END;
+	RETURN par
+END ParNode1;
+
 PROCEDURE CallNode1(obj: B.Object): B.Node;
-	VAR call: B.Node; fpar: B.Ident; 
-		par: B.Node;
+	VAR call: B.Node; fpar: B.Ident;
 BEGIN
 	call := NewNode(obj); call.op := S.call;
-	call.x := NodeChild1(obj.left);
-	WHILE 
+	call.x := NodeChild1(obj.left); fpar := obj.left.type.fields;
+	call.y := ParNode1(obj.right, fpar, 0);
 	RETURN call
 END CallNode1;
 
