@@ -659,10 +659,17 @@ END AllocStaticData;
 (* -------------------------------------------------------------------------- *)
 (* Pass 1 *)
 
+PROCEDURE NewNode0(): Node;
+	VAR x: Node;
+BEGIN
+	NEW(x); x.op := S.null; x.ref := FALSE; 
+	RETURN x
+END NewNode0;
+
 PROCEDURE NewNode(obj: B.Object): Node;
 	VAR x: Node;
 BEGIN
-	NEW(x); x.type := obj.type; x.ref := FALSE
+	x := NewNode0(); x.type := obj.type;
 	RETURN x
 END NewNode;
 
@@ -728,22 +735,40 @@ BEGIN
 	RETURN x
 END NodeChild1;
 
-PROCEDURE ParNode1(obj: B.Object; fpar: B.Ident; adr: INTEGER): B.Node;
-	VAR par: B.Node;
+PROCEDURE SetParUsedRegs1(
+	VAR usedRegs: SET; adr: INTEGER; type: B.Type; varpar: BOOLEAN
+);
+BEGIN
+	IF adr < 32 THEN
+		IF ~(type.form = B.tReal) OR varpar THEN
+			INCL(usedRegs, parPassingReg[adr MOD 8])
+		ELSE INCL(usedRegs, adr MOD 8)
+		END
+	END
+END SetParUsedRegs1;
+
+PROCEDURE ParNode1(obj: B.Object; fpar: B.Ident; adr: INTEGER): Node;
+	VAR pObj: B.Node; par: Node; fpObj: B.Par;
 BEGIN
 	IF obj = NIL THEN par := NIL
-	ELSE par := NewNode(obj); par.x := NodeChild1(obj.left);
-		IF adr < 32 THEN
-			IF fpar.type # B.realType THEN
-			
-			END
+	ELSE pObj := obj(B.Node); fpObj := fpar.obj(B.Par);
+		par := NewNode(pObj); par.op := S.par; par.x := ChildNode1(pObj.left);
+		SetParUsedRegs1(par.usedRegs, adr, fpObj.type, fpObj.varpar);
+		par.a := adr; INC(adr);
+		IF (fpObj.type.form = B.tRec) & fpObj.varpar
+		OR B.IsOpenArray(fObj.type) THEN
+			par.y := NewNode0(); par.y.op := S.par;
+			SetParUsedRegs1(par.y.usedRegs, adr, B.intType, FALSE);
+			par.y.a := adr; INC(adr);
+			par.y.y := ParNode1(pObj.right, fpar.next, adr)
+		ELSE par.y := ParNode1(pObj.right, fpar.next, adr)
 		END
 	END;
 	RETURN par
 END ParNode1;
 
-PROCEDURE CallNode1(obj: B.Object): B.Node;
-	VAR call: B.Node; fpar: B.Ident;
+PROCEDURE CallNode1(obj: B.Node): Node;
+	VAR call: Node; fpar: B.Ident;
 BEGIN
 	call := NewNode(obj); call.op := S.call;
 	call.x := NodeChild1(obj.left); fpar := obj.left.type.fields;
