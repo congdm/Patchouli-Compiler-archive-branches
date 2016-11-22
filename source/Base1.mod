@@ -44,7 +44,7 @@ TYPE
 	TypeList* = POINTER TO RECORD type*: Type; next*: TypeList END;
 	
 	ObjDesc* = EXTENSIBLE RECORD
-		class*: INTEGER; type*: Type; ident*: Ident
+		class*: INTEGER; type*: Type; ident*: Ident; genFlag*: SET
 	END;
 	Const* = POINTER TO EXTENSIBLE RECORD (ObjDesc) val*: INTEGER END;
 	Field* = POINTER TO EXTENSIBLE RECORD (ObjDesc) off*: INTEGER END;

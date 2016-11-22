@@ -87,15 +87,14 @@ TYPE
 	Inst17 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 17 OF BYTE END;
 	Inst18 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 18 OF BYTE END;
 	
-	Node = POINTER TO RECORD
-		mode, op, r, rm: BYTE; ref: BOOLEAN;
-		a, b: INTEGER; usedRegs, curRegs: SET; type: B.Type;
-		x, y, next, fLink, tLink: Node
-	END
+	Item = RECORD
+		mode, op, r, rm: BYTE; ref, par: BOOLEAN;
+		a, b, c, strlen: INTEGER; type: B.Type
+	END;
 	
 VAR
 	(* forward decl *)
-	Node1_: PROCEDURE(obj: B.Object): B.Node;
+	
 
 	code: ARRAY 32 OF BYTE; cpos: INTEGER;
 	procList, curProc: Proc;
@@ -103,6 +102,9 @@ VAR
 	stack, regStack: INTEGER;
 	mem: RECORD
 		mod, rm, bas, idx, scl, disp: INTEGER
+	END;
+	MkItmStat: RECORD (* State for MakeItem procedures in Pass 2 *)
+		alloc, avoid: SET; bestReg: INTEGER
 	END;
 	
 	varSize, staticSize: INTEGER;
@@ -659,148 +661,81 @@ END AllocStaticData;
 (* -------------------------------------------------------------------------- *)
 (* Pass 1 *)
 
-PROCEDURE NewNode0(): Node;
-	VAR x: Node;
+PROCEDURE Pass1(obj: B.Object);
+	VAR node: B.Node;
 BEGIN
-	NEW(x); x.op := S.null; x.ref := FALSE; 
-	RETURN x
-END NewNode0;
-
-PROCEDURE NewNode(obj: B.Object): Node;
-	VAR x: Node;
-BEGIN
-	x := NewNode0(); x.type := obj.type;
-	RETURN x
-END NewNode;
-
-PROCEDURE Const1(obj: B.Const): Node;
-	VAR x: Node;
-BEGIN
-	x := NewNode(obj); x.mode := mImm; x.a := obj.val;
-	RETURN x
-END Const1;
-
-PROCEDURE Var1(obj: B.Var): Node;
-	VAR x: Node;
-BEGIN
-	x := NewNode(obj); x.a := obj.adr;
-	IF x.lev > 0 THEN x.mode := mSP
-	ELSIF x.lev = 0 THEN x.mode := mIP
-	ELSIF x.lev < -1 THEN x.mode := mIP; x.ref := TRUE
-	ELSIF x.lev > 0 THEN x.mode := mSP; x.ref := obj IS B.Par
-	ELSE ASSERT(FALSE)
-	END
-END Var1;
-
-PROCEDURE Proc1(obj: B.Proc): Node;
-	VAR x: Node;
-BEGIN
-	x := NewNode(obj); x.a := obj.adr; x.mode := mProc;
-	RETURN x
-END Proc1;
-
-PROCEDURE SetNodeMode1(node: Node);
-	VAR op: INTEGER;
-BEGIN op := node.op;
-	IF (op >= S.times) & (op <= S.or) THEN
-		IF node.type = B.realType THEN node.mode := mXReg
-		ELSIF (op = S.and) OR (op = S.or) THEN node.mode := mCond
-		ELSE node.mode := mReg
-		END
-	ELSIF (op >= S.eql) & (op <= S.is) THEN node.mode := mCond
-	ELSIF op = S.arrow THEN node.mode := mRegI
-	ELSIF op = S.period THEN
-		IF node.x.ref THEN node.mode := node.x.mode; node.ref := TRUE
-		ELSE node.mode := mRegI
-		END
-	ELSIF op = S.lbrak THEN
-		IF node.x.ref & (node.y.mode = mImm) THEN
-			node.mode := node.x.mode; node.ref := TRUE
-		ELSE node.mode := mRegI
-		END
-	ELSIF op = S.lparen THEN node.mode := node.x.mode
-	END
-END SetNodeMode1;
-
-PROCEDURE NodeChild1(obj: B.Object): Node;
-	VAR x: Node;
-BEGIN
-	IF obj = NIL THEN x := NIL
-	ELSIF obj IS B.Const THEN x := Const1(obj(B.Const))
-	ELSIF obj IS B.Var THEN x := Var1(obj(B.Var))
-	ELSIF obj IS B.Proc THEN x := Proc1(obj(B.Proc))
-	ELSIF obj IS B.Node THEN x := Node1_(obj(B.Node))
-	ELSE ASSERT(FALSE)
-	END;
-	RETURN x
-END NodeChild1;
-
-PROCEDURE SetParUsedRegs1(
-	VAR usedRegs: SET; adr: INTEGER; type: B.Type; varpar: BOOLEAN
-);
-BEGIN
-	IF adr < 32 THEN
-		IF ~(type.form = B.tReal) OR varpar THEN
-			INCL(usedRegs, parPassingReg[adr MOD 8])
-		ELSE INCL(usedRegs, adr MOD 8)
-		END
-	END
-END SetParUsedRegs1;
-
-PROCEDURE ParNode1(obj: B.Object; fpar: B.Ident; adr: INTEGER): Node;
-	VAR pObj: B.Node; par: Node; fpObj: B.Par;
-BEGIN
-	IF obj = NIL THEN par := NIL
-	ELSE pObj := obj(B.Node); fpObj := fpar.obj(B.Par);
-		par := NewNode(pObj); par.op := S.par; par.x := ChildNode1(pObj.left);
-		SetParUsedRegs1(par.usedRegs, adr, fpObj.type, fpObj.varpar);
-		par.a := adr; INC(adr);
-		IF (fpObj.type.form = B.tRec) & fpObj.varpar
-		OR B.IsOpenArray(fObj.type) THEN
-			par.y := NewNode0(); par.y.op := S.par;
-			SetParUsedRegs1(par.y.usedRegs, adr, B.intType, FALSE);
-			par.y.a := adr; INC(adr);
-			par.y.y := ParNode1(pObj.right, fpar.next, adr)
-		ELSE par.y := ParNode1(pObj.right, fpar.next, adr)
-		END
-	END;
-	RETURN par
-END ParNode1;
-
-PROCEDURE CallNode1(obj: B.Node): Node;
-	VAR call: Node; fpar: B.Ident;
-BEGIN
-	call := NewNode(obj); call.op := S.call;
-	call.x := NodeChild1(obj.left); fpar := obj.left.type.fields;
-	call.y := ParNode1(obj.right, fpar, 0);
-	RETURN call
-END CallNode1;
-
-PROCEDURE Node1(obj: B.Node): Node;
-	VAR node: Node; op: INTEGER;
-BEGIN
-	op := obj.op;
-	IF op = S.call THEN node := CallNode1(obj)
-	ELSIF op = S.sproc THEN node := SProcNode1(obj)
-	ELSE node := NewNode(obj); node.op := op;
-		node.x := NodeChild1(obj.left); node.y := NodeChild1(obj.right);
-		node.usedRegs := node.usedRegs + node.x.usedRegs;
-		IF node.y # NIL THEN
-			node.usedRegs := node.usedRegs + node.y.usedRegs
+	obj.genFlag := {};
+	IF obj IS B.Node THEN node := obj(B.Node);
+		IF (node.op = S.div) OR (node.op = S.mod) THEN
+			node.genFlag := node.genFlag + {reg_A, reg_D}
+		ELSIF (node.op = S.sproc) & (node.left(B.SProc).id IN B.sfShifts)
+			& ~(node.right IS B.Const) THEN
+			INCL(node.genFlag, reg_C)
 		END;
-		IF (op = S.div) OR (op = S.mod) THEN
-			INCL(node.usedRegs, reg_A); INCL(node.usedRegs, reg_D)
-		ELSIF op = S.upto THEN INCL(node.usedRegs, reg_C)
+		IF node.left # NIL THEN Pass1(node.left);
+			node.genFlag := node.genFlag + node.left.genFlag
 		END;
-		SetNodeMode1(node)
-	END;
-	RETURN node
-END Node1;
-
-PROCEDURE Pass1;
-BEGIN
-	
+		IF node.right # NIL THEN Pass1(node.right);
+			node.genFlag := node.genFlag + node.right.genFlag
+		END;
+	END
 END Pass1;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+(* Pass 2 *)
+
+PROCEDURE AllocReg(): INTEGER;
+	VAR reg: INTEGER; cantAlloc: SET;
+BEGIN
+	cantAlloc := MkItmStat.avoid + MkItmStat.alloc + {reg_SP, reg_BP};
+	IF (MkItmStat.bestReg = -1) OR (MkItmState.bestReg IN cantAlloc) THEN
+		reg := 0; WHILE (reg < 16) & (reg IN cantAlloc) DO INC(reg) END;
+		IF reg >= 16 THEN (* error, reg stack overflow *) reg := 0 END
+	ELSE reg := MkItmStat.bestReg
+	END;
+	INCL(MkItmStat.alloc, reg);
+	RETURN reg
+END AllocReg;
+
+PROCEDURE Load(VAR x: Item);
+	VAR reg: INTEGER;
+BEGIN
+	IF x.type.form # B.tReal THEN
+		IF x.mode # mReg THEN reg := AllocReg();
+			
+		END
+	END
+END Load;
+
+PROCEDURE Add(VAR x: Item; node: B.Node);
+	VAR y: Item;
+BEGIN
+	IF node.type.form = B.tInt THEN
+		MakeItem0(x, node.left); Load(x);
+		MakeItem0(y, node.right); Load(y);
+		
+	END
+END Add;
+
+PROCEDURE MakeItem(VAR x: Item; obj: B.Object);
+	VAR objv: B.Var; node: B.Node;
+BEGIN
+	IF ~(obj IS B.Node) THEN x.type := obj.type; x.ref := FALSE END;
+	IF obj IS B.Const THEN x.mode := mImm; x.a := obj(B.Const).val
+	ELSIF obj IS B.Var THEN objv := obj(B.Var); x.a := objv.adr;
+		IF objv.lev <= 0 THEN x.mode := mIP ELSE x.mode := mSP END;
+		IF objv.lev < -1 THEN x.ref := TRUE END;
+		IF objv IS B.Str THEN x.strlen := objv(B.Str).len END;
+		x.par := objv IS B.Par
+	ELSIF obj IS B.Proc THEN x.mode := mProc;
+		IF obj(B.Proc).lev < -1 THEN x.ref := TRUE END
+	ELSIF obj.class = B.cType THEN x.mode := mType
+	ELSIF obj IS B.Node THEN node := obj(B.Node);
+		IF node.op = S.add THEN Add(x, node)
+		END
+	END;
+END MakeItem;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -825,7 +760,6 @@ BEGIN
 END Init;
 
 BEGIN
-	Node1_ := Node1;
 	parPassingReg[0] := reg_C; parPassingReg[1] := reg_D;
 	parPassingReg[2] := reg_R8; parPassingReg[3] := reg_R9
 END Generator1.
