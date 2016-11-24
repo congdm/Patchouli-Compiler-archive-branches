@@ -1,7 +1,7 @@
 MODULE Generator1;
 
 IMPORT
-	SYSTEM, BaseSys,
+	SYSTEM, Sys := BaseSys,
 	S := Scanner1, B := Base1;
 
 CONST
@@ -67,26 +67,6 @@ TYPE
 		next: Proc
 	END;
 	
-	Inst = POINTER TO EXTENSIBLE RECORD next, link: Inst; sz: BYTE END;
-	Inst1 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 1 OF BYTE END;
-	Inst2 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 2 OF BYTE END;
-	Inst3 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 3 OF BYTE END;
-	Inst4 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 4 OF BYTE END;
-	Inst5 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 5 OF BYTE END;
-	Inst6 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 6 OF BYTE END;
-	Inst7 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 7 OF BYTE END;
-	Inst8 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 8 OF BYTE END;
-	Inst9 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 9 OF BYTE END;
-	Inst10 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 10 OF BYTE END;
-	Inst11 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 11 OF BYTE END;
-	Inst12 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 12 OF BYTE END;
-	Inst13 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 13 OF BYTE END;
-	Inst14 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 14 OF BYTE END;
-	Inst15 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 15 OF BYTE END;
-	Inst16 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 16 OF BYTE END;
-	Inst17 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 17 OF BYTE END;
-	Inst18 = POINTER TO RECORD EXTENSIBLE (Inst) a: ARRAY 18 OF BYTE END;
-	
 	Item = RECORD
 		mode, op, r, rm: BYTE; ref, par: BOOLEAN;
 		a, b, c, strlen: INTEGER; type: B.Type
@@ -94,9 +74,9 @@ TYPE
 	
 VAR
 	(* forward decl *)
-	
+	MakeItem0: PROCEDURE(VAR x: Item; obj: B.Object);
 
-	code: ARRAY 32 OF BYTE; cpos: INTEGER;
+	code: Sys.MemFile; codeRider: Sys.MemFileRider;
 	procList, curProc: Proc;
 
 	stack, regStack: INTEGER;
@@ -117,33 +97,19 @@ VAR
 (* Machine code emitter *)
 
 PROCEDURE Put1(n: INTEGER);
-BEGIN code[cpos] := n MOD 256; INC(cpos)
+BEGIN Sys.WriteMemFile(codeRider, n)
 END Put1;
 
 PROCEDURE Put2(n: INTEGER);
-BEGIN
-	code[cpos] := n MOD 256; n := n DIV 256;
-	code[cpos+1] := n MOD 256; cpos := cpos + 2
+BEGIN Put1(n); n := n DIV 256; Put1(n)
 END Put2;
 
 PROCEDURE Put4(n: INTEGER);
-BEGIN
-	code[cpos] := n MOD 256; n := n DIV 256;
-	code[cpos+1] := n MOD 256; n := n DIV 256;
-	code[cpos+2] := n MOD 256; n := n DIV 256;
-	code[cpos+3] := n MOD 256; cpos := cpos + 4
+BEGIN Put2(n); n := n DIV 10000H; Put2(n)
 END Put4;
 
 PROCEDURE Put8(n: INTEGER);
-BEGIN
-	code[cpos] := n MOD 256; n := n DIV 256;
-	code[cpos+1] := n MOD 256; n := n DIV 256;
-	code[cpos+2] := n MOD 256; n := n DIV 256;
-	code[cpos+3] := n MOD 256; n := n DIV 256;
-	code[cpos+4] := n MOD 256; n := n DIV 256;
-	code[cpos+5] := n MOD 256; n := n DIV 256;
-	code[cpos+6] := n MOD 256; n := n DIV 256;
-	code[cpos+7] := n MOD 256; cpos := cpos + 8
+BEGIN Put4(n); n := n DIV 100000000H; Put4(n)
 END Put8;
 	
 PROCEDURE EmitREX(reg, rsize: INTEGER);
@@ -196,6 +162,8 @@ BEGIN
 		END
 	END
 END EmitModRM;
+
+PROCEDURE NewInst;
 
 (* -------------------------------------------------------------------------- *)
 
@@ -311,15 +279,9 @@ BEGIN
 	END
 END SetRm_regI;
 
-(*PROCEDURE SetRmOperand_staticvar (adr: INTEGER);
+PROCEDURE SetRmOperand(x: Item);
 BEGIN
-	Emit.mem.rm := reg_BP; Emit.mem.disp := adr + staticbase;
-	Emit.mem.mod := 0; metacode[pc].relfixup := TRUE
-END SetRmOperand_staticvar;
-
-PROCEDURE SetRmOperand (x : Base.Item);
-BEGIN
-	IF x.mode IN {Base.cVar, Base.cRef} THEN
+	IF x.mode = mSP THEN
 		Emit.mem.rm := reg_BP; Emit.mem.disp := x.a;
 		IF x.lev > 0 THEN
 			IF (x.a >= -128) & (x.a <= 127) THEN Emit.mem.mod := 1
@@ -337,7 +299,7 @@ BEGIN
 		Emit.mem.mod := 0; metacode[pc].relfixup := TRUE;
 		IF x.lev < 0 THEN Emit.mem.disp := Emit.mem.disp + staticbase END
 	END
-END SetRmOperand;*)
+END SetRmOperand;
 
 (* -------------------------------------------------------------------------- *)
 
@@ -703,7 +665,7 @@ PROCEDURE Load(VAR x: Item);
 BEGIN
 	IF x.type.form # B.tReal THEN
 		IF x.mode # mReg THEN reg := AllocReg();
-			
+			IF 
 		END
 	END
 END Load;
@@ -760,6 +722,7 @@ BEGIN
 END Init;
 
 BEGIN
+	MakeItem0 := MakeItem;
 	parPassingReg[0] := reg_C; parPassingReg[1] := reg_D;
 	parPassingReg[2] := reg_R8; parPassingReg[3] := reg_R9
 END Generator1.

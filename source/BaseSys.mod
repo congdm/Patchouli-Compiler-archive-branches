@@ -16,8 +16,11 @@ TYPE
 	Word = INTEGER;
 	Bool = INTEGER;
 	LargeInteger = INTEGER;
+	SizeT = INTEGER;
 	
 	File* = RECORD handle: Handle END;
+	MemFile* = POINTER TO RECORD ptr: Pointer; len, maxlen: INTEGER END;
+	MemFileRider* = RECORD f: MemFile; pos: INTEGER; eof*: BOOLEAN END;
 	
 VAR
 	GetFileAttributesW: PROCEDURE(lpFileName: Pointer): Dword;
@@ -61,9 +64,23 @@ VAR
 		lpDefaultChar, lpUsedDefaultChar: Pointer
 	): Int;
 	GetStdHandle: PROCEDURE(nStdHandle: Dword): Handle;
-	
-	ConsoleWrite: PROCEDURE(ch: CHAR);
-	ConsoleWriteInt: PROCEDURE(n: INTEGER);
+	GetProcessHeap: PROCEDURE(): Handle;
+	HeapAlloc: PROCEDURE(
+		hHeap: Handle;
+		dwFlags: Dword;
+		dwBytes: SizeT
+	): Pointer;
+	HeapFree: PROCEDURE(
+		hHeap: Handle;
+		dwFlags: Dword;
+		lpMem: Pointer
+	): Bool;
+	HeapReAlloc: PROCEDURE(
+		hHeap: Handle;
+		dwFlags: Dword;
+		lpMem: Pointer;
+		dwBytes: SizeT
+	): Pointer;
 	
 PROCEDURE ImportProc(
 	VAR proc: ARRAY OF SYSTEM.BYTE;
@@ -403,6 +420,68 @@ END GetArg;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
+(* MemFile *)
+
+PROCEDURE NewMemFile*(VAR f: MemFile);
+	VAR hHeap: Handle;
+BEGIN NEW(f);
+	hHeap := GetProcessHeap(); f.ptr := HeapAlloc(hHeap, 0, 1024);
+	f.maxlen := 1024; f.len := 0
+END NewMemFile;
+
+PROCEDURE DeleteMemFile*(f: MemFile);
+	VAR hHeap: Handle; bRes: Bool;
+BEGIN hHeap := GetProcessHeap(); bRes := HeapFree(hHeap, 0, f.ptr);
+	f.ptr := 0; f.maxlen := 0; f.len := 0
+END DeleteMemFile;
+
+PROCEDURE ExtendMemFile(f: MemFile; amount: INTEGER);
+	VAR hHeap: Handle;
+BEGIN hHeap := GetProcessHeap(); INC(f.maxlen, amount);
+	f.ptr := HeapReAlloc(hHeap, 0, f.ptr, f.maxlen)
+END ExtendMemFile;
+
+PROCEDURE MergeMemFile*(f1, f2: MemFile);
+	VAR newLen: INTEGER;
+BEGIN
+	IF f1.maxlen < f1.len + f2.len THEN
+		newLen := f1.len + f2.len; newLen := newLen + (-newLen) MOD 1024;
+		ExtendMemFile(f1, newLen - f1.maxlen)
+	END;
+	SYSTEM.COPY(f2.ptr, f1.ptr + f1.len, f2.len);
+	DeleteMemFile(f2)
+END MergeMemFile;
+
+PROCEDURE SetMemFile*(VAR r: MemFileRider; f: MemFile; pos: INTEGER);
+BEGIN r.f := f; r.eof := FALSE;
+	IF pos >= 0 THEN
+		IF pos <= f.len THEN r.pos := pos ELSE r.pos := f.len END
+	ELSE r.pos := 0
+	END
+END SetMemFile;
+
+PROCEDURE WriteMemFile*(VAR r: MemFileRider; x: BYTE);
+BEGIN
+	IF r.pos <= r.f.len THEN
+		IF size > 8 THEN size := 8 END;
+		IF size > 0 THEN
+			IF r.pos+1 > r.f.maxlen THEN ExtendMemFile(r.f, 1024) END;
+			SYSTEM.PUT(r.f.ptr + r.pos, x); INC(r.pos);
+			IF r.pos > r.f.len THEN INC(r.f.len)
+		END
+	ELSE r.eof := TRUE
+	END
+END WriteMemFile;
+
+PROCEDURE ReadMemFile*(VAR r: MemFileRider; VAR x: BYTE);
+BEGIN
+	IF r.pos < r.f.len THEN SYSTEM.GET(r.f.ptr + r.pos, x); INC(r.pos)
+	ELSE r.eof := TRUE
+	END
+END ReadMemFile;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
 
 PROCEDURE Init;
 BEGIN
@@ -418,8 +497,10 @@ BEGIN
 	ImportProc(GetCommandLineW, Kernel32, 'GetCommandLineW');
 	ImportProc(WideCharToMultiByte, Kernel32, 'WideCharToMultiByte');
 	ImportProc(GetStdHandle, Kernel32, 'GetStdHandle');
-	ConsoleWrite := Console_Write;
-	ConsoleWriteInt := Console_WriteInt
+	ImportProc(GetProcessHeap, Kernel32, 'GetProcessHeap');
+	ImportProc(HeapAlloc, Kernel32, 'HeapAlloc');
+	ImportProc(HeapFree, Kernel32, 'HeapFree');
+	ImportProc(HeapReAlloc, Kernel32, 'HeapReAlloc')
 END Init;
 
 BEGIN Init
