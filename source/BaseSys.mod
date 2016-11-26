@@ -4,6 +4,8 @@ IMPORT
 	SYSTEM;
 	
 CONST
+	memFileBlk = 128;
+
 	Kernel32 = 'Kernel32.dll';
 	GENERIC_READ = {31}; GENERIC_WRITE = {30};
 	
@@ -425,8 +427,8 @@ END GetArg;
 PROCEDURE NewMemFile*(VAR f: MemFile);
 	VAR hHeap: Handle;
 BEGIN NEW(f);
-	hHeap := GetProcessHeap(); f.ptr := HeapAlloc(hHeap, 0, 1024);
-	f.maxlen := 1024; f.len := 0
+	hHeap := GetProcessHeap(); f.ptr := HeapAlloc(hHeap, 0, memFileBlk);
+	f.maxlen := memFileBlk; f.len := 0
 END NewMemFile;
 
 PROCEDURE DeleteMemFile*(f: MemFile);
@@ -437,7 +439,8 @@ END DeleteMemFile;
 
 PROCEDURE ExtendMemFile(f: MemFile; amount: INTEGER);
 	VAR hHeap: Handle;
-BEGIN hHeap := GetProcessHeap(); INC(f.maxlen, amount);
+BEGIN amount := amount + (-amount) MOD memFileBlk;
+	hHeap := GetProcessHeap(); INC(f.maxlen, amount);
 	f.ptr := HeapReAlloc(hHeap, 0, f.ptr, f.maxlen)
 END ExtendMemFile;
 
@@ -445,12 +448,16 @@ PROCEDURE MergeMemFile*(f1, f2: MemFile);
 	VAR newLen: INTEGER;
 BEGIN
 	IF f1.maxlen < f1.len + f2.len THEN
-		newLen := f1.len + f2.len; newLen := newLen + (-newLen) MOD 1024;
+		newLen := f1.len + f2.len; newLen := newLen + (-newLen) MOD memFileBlk;
 		ExtendMemFile(f1, newLen - f1.maxlen)
 	END;
 	SYSTEM.COPY(f2.ptr, f1.ptr + f1.len, f2.len);
 	DeleteMemFile(f2)
 END MergeMemFile;
+
+PROCEDURE MemFileLength*(f: MemFile): INTEGER;
+	RETURN f.len
+END MemFileLength;
 
 PROCEDURE SetMemFile*(VAR r: MemFileRider; f: MemFile; pos: INTEGER);
 BEGIN r.f := f; r.eof := FALSE;
@@ -465,7 +472,7 @@ BEGIN
 	IF r.pos <= r.f.len THEN
 		IF size > 8 THEN size := 8 END;
 		IF size > 0 THEN
-			IF r.pos+1 > r.f.maxlen THEN ExtendMemFile(r.f, 1024) END;
+			IF r.pos+1 > r.f.maxlen THEN ExtendMemFile(r.f, memFileBlk) END;
 			SYSTEM.PUT(r.f.ptr + r.pos, x); INC(r.pos);
 			IF r.pos > r.f.len THEN INC(r.f.len)
 		END
