@@ -72,28 +72,29 @@ TYPE
 	
 	Item = RECORD
 		mode, op, r, rm: BYTE; ref, par: BOOLEAN;
-		a, b, c, strlen: INTEGER; type: B.Type
+		a, b, c, strlen: INTEGER; aLink, bLink: Block; type: B.Type
 	END;
 	
-	Block = RECORD
-		code, fxSP, fxIP, fxProc: Sys.MemFile;
-		rCode, rSP, rIP, rProc: Sys.MemFileRider
+	Block = POINTER TO RECORD
+		code: Sys.MemFile; rCode: Sys.MemFileRider;
+		jc: INTEGER; next, link, jDst: Block
+	END;
+	
+	MakeItemState = RECORD
+		alloc, avoid, xAlloc, xAvoid: SET; bestReg, bestXReg: INTEGER
 	END;
 	
 VAR
 	(* forward decl *)
 	MakeItem0: PROCEDURE(VAR x: Item; obj: B.Object);
 
-	curBlk: Block;
+	firstBlk, curBlk: Block;
 	procList, curProc: Proc;
 
-	stack, regStack: INTEGER;
 	mem: RECORD
-		mod, rm, bas, idx, scl, disp, mFixup: INTEGER
+		mod, rm, bas, idx, scl, disp: INTEGER
 	END;
-	MkItmStat: RECORD (* State for MakeItem procedures in Pass 2 *)
-		alloc, avoid, xAlloc, xAvoid: SET; bestReg, bestXReg: INTEGER
-	END;
+	MkItmStat: MakeItemState; (* State for MakeItem procedures in Pass 2 *)
 	
 	varSize, staticSize: INTEGER;
 	impList: B.Ident;
@@ -104,11 +105,14 @@ VAR
 (* -------------------------------------------------------------------------- *)
 
 PROCEDURE NewBlock(VAR blk: Block);
-BEGIN Sys.NewMemFile(blk.code); Sys.NewMemFile(blk.fxSP);
-	Sys.NewMemFile(blk.fxIP); Sys.NewMemFile(blk.fxProc);
-	Sys.SetMemFile(blk.rCode, blk.code); Sys.SetMemFile(blk.rSP, blk.fxSP);
-	Sys.SetMemFile(blk.rIP, blk.fxIP); Sys.SetMemFile(blk.rProc, blk.fxProc)
+BEGIN NEW(blk); Sys.NewMemFile(blk.code); Sys.SetMemFile(blk.rCode, blk.code);
 END NewBlock;
+
+PROCEDURE OpenBlock(oldBlkCond: INTEGER);
+	VAR newBlk: Block;
+BEGIN NewBlock(newBlk); newBlk.link := NIL; newBlk.jDst := NIL;
+	curBlk.jc := oldBlkCond; curBlk.next := newBlk; curBlk := newBlk
+END OpenBlock;
 
 PROCEDURE Put1(n: INTEGER);
 BEGIN Sys.WriteMemFile(blk.rCode, n)
@@ -130,29 +134,20 @@ PROCEDURE CodeLen(): INTEGER;
 	RETURN Sys.MemFileLength(curBlk.code)
 END CodeLen;
 
-PROCEDURE PutFixup(mode: INTEGER; dispSize: INTEGER);
-	VAR pos: INTEGER;
-BEGIN pos := CodeLen();
-	IF mode = -1 THEN (* nothing *)
-	ELSE Sys.MemFileWrite(curBlk.rSP, dispSize);
-		IF mode = mSP THEN
-			Sys.MemFileWrite(curBlk.rSP, pos); pos := pos DIV 256;
-			Sys.MemFileWrite(curBlk.rSP, pos); pos := pos DIV 256;
-			Sys.MemFileWrite(curBlk.rSP, pos); pos := pos DIV 256;
-			Sys.MemFileWrite(curBlk.rSP, pos)
-		ELSIF mode = mIP THEN
-			Sys.MemFileWrite(curBlk.rIP, pos); pos := pos DIV 256;
-			Sys.MemFileWrite(curBlk.rIP, pos); pos := pos DIV 256;
-			Sys.MemFileWrite(curBlk.rIP, pos); pos := pos DIV 256;
-			Sys.MemFileWrite(curBlk.rIP, pos)
-		ELSIF mode = mProc THEN
-			Sys.MemFileWrite(curBlk.rProc, pos); pos := pos DIV 256;
-			Sys.MemFileWrite(curBlk.rProc, pos); pos := pos DIV 256;
-			Sys.MemFileWrite(curBlk.rProc, pos); pos := pos DIV 256;
-			Sys.MemFileWrite(curBlk.rProc, pos)
-		END
-	END
-END PutFixup;
+PROCEDURE CodeLen0(blk: Block): INTEGER;
+	RETURN Sys.MemFileLength(blk.code)
+END CodeLen;
+
+PROCEDURE MergeNextBlock(blk: Block);
+	VAR next: Block;
+BEGIN ASSERT(blk.jDst = NIL);
+	next := blk; Sys.MergeMemFile(blk.code, next.code); blk.next := next.next;
+	IF blk.next = NIL THEN curBlk := blk END
+END MergeNextBlock;
+
+PROCEDURE MergeFrom(blk: Block);
+BEGIN WHILE blk # curBlk DO MergeNextBlock(blk) END
+END MergeFrom;
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -201,10 +196,9 @@ BEGIN
 		IF mem.rm IN {reg_SP, reg_R12} THEN
 			Put1(mem.scl * 64 + mem.idx MOD 8 * 8 + mem.bas MOD 8)
 		END;
-		IF (mem.mod = 0) & (mem.rm IN {reg_BP, reg_R13}) OR (mem.mod = 2) THEN
-			IF mem.mFixup # -1 THEN PutFixup(mem.mFixup, 4) END; Put4(mem.disp)
-		ELSIF mem.mod = 1 THEN
-			IF mem.mFixup # -1 THEN PutFixup(mem.mFixup, 1) END; Put1(mem.disp)
+		IF (mem.mod = 0) & (mem.rm IN {reg_BP, reg_R13})
+		OR (mem.mod = 2) THEN Put4(mem.disp)
+		ELSIF mem.mod = 1 THEN Put1(mem.disp)
 		END
 	END
 END EmitModRM;
@@ -306,7 +300,7 @@ END EmitMOVSX;
 (* -------------------------------------------------------------------------- *)
 
 PROCEDURE SetRm_reg(reg: INTEGER);
-BEGIN mem.rm := reg; mem.mod := 3; mem.mFixup := -1
+BEGIN mem.rm := reg; mem.mod := 3
 END SetRm_reg;
 
 PROCEDURE SetRm_regI(reg, disp: INTEGER);
@@ -320,22 +314,31 @@ BEGIN
 	END;
 	IF reg IN {reg_SP, reg_R12} THEN
 		mem.bas := reg_SP; mem.idx := reg_SP; mem.scl := 0
-	END;
-	mem.mFixup := -1
+	END
 END SetRm_regI;
 
 PROCEDURE SetRmOperand(x: Item);
 BEGIN
 	IF x.mode = mSP THEN
 		mem.rm := reg_SP; mem.bas := reg_SP; mem.idx := reg_SP;
-		mem.scl := 0; mem.disp := x.a; mem.mFixup := mSP;
+		mem.scl := 0; mem.disp := x.a;
 		IF (x.a >= -128) & (x.a <= 127) THEN mem.mod := 1 ELSE mem.mod := 2 END
-	ELSIF x.mode = mIP THEN
-		mem.rm := reg_BP; mem.disp := x.a; mem.mod := 0; mem.mFixup := mIP
+	ELSIF x.mode = mBP THEN
+		mem.rm := reg_BP; mem.disp := x.a;
+		IF (x.a >= -128) & (x.a <= 127) THEN mem.mod := 1 ELSE mem.mod := 2 END
+	ELSIF x.mode = mIP THEN mem.rm := reg_BP; mem.disp := x.a; mem.mod := 0
+	ELSIF x.mode = mBX THEN mem.rm := reg_BX; mem.disp := x.a;
+		IF x.a = 0 THEN mem.mod := 0 
+		ELSIF (x.a >= -128) & (x.a <= 127) THEN mem.mod := 1
+		ELSE mem.mod := 2
+		END
 	ELSIF x.mode = mRegI THEN SetRmOperand_regI(x.r, x.a)
 	ELSIF x.mode = mReg THEN SetRmOperand_reg(x.r)
-	ELSIF x.mode = mProc THEN
-		mem.rm := reg_BP; mem.disp := x.a; mem.mod := 0; mem.mFixup := mIP
+	ELSIF x.mode = mProc THEN mem.rm := reg_BX; mem.disp := x.a;
+		IF x.a = 0 THEN mem.mod := 0 
+		ELSIF (x.a >= -128) & (x.a <= 127) THEN mem.mod := 1
+		ELSE mem.mod := 2
+		END
 	END
 END SetRmOperand;
 
@@ -383,12 +386,20 @@ PROCEDURE Branch(disp: INTEGER);
 BEGIN Put1(0E9H); Put4(disp)
 END Branch;
 
+PROCEDURE Branch1(disp: INTEGER);
+BEGIN Put1(0EBH); Put1(disp)
+END Branch1;
+
 PROCEDURE CallNear(disp: INTEGER);
 BEGIN Put1(0E8H); Put4(disp)
 END CallNear;
 
 PROCEDURE CondBranch(cond, disp: INTEGER);
 BEGIN Put1(0FH); Put1(80H + cond); Put4(disp)
+END CondBranch;
+
+PROCEDURE CondBranch1(cond, disp: INTEGER);
+BEGIN Put1(70H + cond); Put1(disp)
 END CondBranch;
 
 PROCEDURE SetccRm(cond: INTEGER);
@@ -432,10 +443,64 @@ END Pass1;
 (* -------------------------------------------------------------------------- *)
 (* Pass 2 *)
 
+PROCEDURE negated(cond: INTEGER): INTEGER;
+BEGIN IF ODD(cond) THEN DEC(cond) ELSE INC(cond) END; RETURN cond
+END negated;
+
+PROCEDURE FJump0(src: Block);
+	VAR off, cc: INTEGER; blk: Block;
+BEGIN off := 0; blk := src.next; cc := src.jc;
+	WHILE blk # src.jDst DO
+		ASSERT(blk.jDst = NIL); INC(off, CodeLen0(blk)); blk := blk.next
+	END;
+	IF (off > 0) & (cc # ccNever) THEN
+		blk := curBlk; curBlk := src; 
+		IF cc = ccAlways THEN
+			IF off <= 127 THEN Branch1(off) ELSE Branch(off) END
+		ELSIF off <= 127 THEN CondBranch1(cc, off) ELSE CondBranch(cc, off)
+		END;
+		curBlk := blk
+	END;
+	src.jDst := NIL
+END FJump0;
+
+PROCEDURE FixLinkWith(L, dst: Block);
+	VAR L1: INTEGER;
+BEGIN
+	WHILE L # NIL DO
+		L.jDst := dst; L1 := L.link; L.link := NIL; L := L1
+	END
+END FixLinkWith;
+
+PROCEDURE FixLink(L: Block);
+BEGIN FixLinkWith(L, curBlk)
+END FixLink;
+
+PROCEDURE merged(L0, L1: Block): Block;
+	VAR L2, L3: Block;
+BEGIN 
+	IF L0 # NIL THEN L3 := L0;
+		REPEAT L2 := L3; L3 := L3.link UNTIL L3 = 0;
+		L2.link := L1; L1 := L0
+	END;
+    RETURN L1
+END merged;
+
+PROCEDURE SetCond(VAR x: Item; c: INTEGER);
+BEGIN x.mode := mCond; x.aLink := NIL; x.bLink := NIL; x.c := c
+END SetCond;
+
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE ResetMkItmStat;
+BEGIN MkItmStat.avoid := {}; MkItmStat.alloc := {}; MkItmStat.bestReg := -1;
+	MkItmStat.xAvoid := {}; MkItmStat.xAlloc := {}; MkItmStat.bestXReg := -1
+END ResetMkItmStat;
+
 PROCEDURE AllocReg(): INTEGER;
 	VAR reg: INTEGER; cantAlloc: SET;
 BEGIN
-	cantAlloc := MkItmStat.avoid + MkItmStat.alloc + {reg_SP, reg_BP};
+	cantAlloc := MkItmStat.avoid + MkItmStat.alloc + {reg_SP, reg_BP, reg_BX};
 	IF (MkItmStat.bestReg = -1) OR (MkItmState.bestReg IN cantAlloc) THEN
 		reg := 0; WHILE (reg < 16) & (reg IN cantAlloc) DO INC(reg) END;
 		IF reg >= 16 THEN S.Mark('Reg stack overflow'); ASSERT(FALSE) END
@@ -447,7 +512,7 @@ END AllocReg;
 
 PROCEDURE AllocReg2(): INTEGER;
 	VAR reg: INTEGER; cantAlloc: SET;
-BEGIN cantAlloc := MkItmStat.alloc + {reg_SP, reg_BP};
+BEGIN cantAlloc := MkItmStat.alloc + {reg_SP, reg_BP, reg_BX};
 	reg := 0; WHILE (reg < 16) & (reg IN cantAlloc) DO INC(reg) END;
 	IF reg >= 16 THEN S.Mark('Reg stack overflow'); ASSERT(FALSE) END;
 	RETURN reg
@@ -481,6 +546,8 @@ END FreeReg;
 PROCEDURE FreeXReg(reg: INTEGER);
 BEGIN EXCL(MkItmStat.xAlloc, reg)
 END FreeXReg;
+
+(* -------------------------------------------------------------------------- *)
 
 PROCEDURE RefToRegI(VAR x: Item);
 	VAR reg: INTEGER;
@@ -597,15 +664,59 @@ END Multiply;
 
 PROCEDURE IntDiv(VAR x: Item; node: B.Node);
 	CONST divReg = {reg_A, reg_D};
-	VAR y: Item;
+	VAR y: Item; blk1, blk2: Block;
 BEGIN MkItmStat.bestReg := reg_A; LoadLeft(x, node); LoadRight(y, node);
 	IF y.r IN divReg THEN
 		MkItmStat.avoid := divReg; RelocReg(y.r, AllocReg())
 	END;
 	IF x.r # reg_A THEN RelocReg(x.r, reg_A); INCL(MkItmStat.alloc, reg_A) END;
 	EmitBare(CQO); EmitR(IDIVa, y.r, 8); EmitRR(TEST, reg_D, 8, reg_D);
-	
+	blk1 := curBlk; OpenBlock(ccL);
+	blk2 := curBlk; OpenBlock(ccAlways); blk1.jDst := curBlk;
+	IF node.op = S.div THEN EmitRI(SUBi, reg_A, 8, 1)
+	ELSE EmitRR(ADDd, reg_D, 8, y.r)
+	END;
+	OpenBlock(0); blk2.jDst := curBlk;
+	FJump0(blk2); FJump0(blk1); MergeFrom(blk1); FreeReg(y.r);
+	IF node.op = S.mod THEN FreeReg(reg_A); x.r := reg_D END
 END IntDiv;
+
+PROCEDURE Divide(VAR x: Item; node: B.Node);
+	VAR y: Item;
+BEGIN LoadLeft(x, node); LoadRight(y, node);
+	IF node.type.form = B.tSet THEN EmitRR(XORd, x.r, 8, y.r)
+	ELSIF node.type = B.realType THEN SetRm_reg(y.r); EmitXmmRm(DIVSD, x.r, 4)
+	ELSE ASSERT(FALSE)
+	END;
+	IF y.type.form # B.tReal THEN FreeReg(y.r) ELSE FreeXReg(y.r) END
+END Divide;
+
+PROCEDURE LoadCond(x: Item; obj: B.Object);
+	VAR oldStat: MakeItemState;
+BEGIN MakeItem0(x, obj);
+	IF x.mode # mCond THEN oldStat := MkItmStat; ResetMkItmStat;
+		IF x.mode = mImm THEN SetCond(x, ccNever - x.a)
+		ELSE Load(x); EmitRR(TEST, x.r, 4, x.r); FreeReg(x.r); SetCond(x, ccNZ)
+		END;
+		MkItmStat := oldStat
+	END
+END LoadCond;
+
+PROCEDURE And(VAR x: Item; node: B.Node);
+	VAR y: Item;
+BEGIN LoadCond(x, node.left); x.aLink := curBlk;
+	OpenBlock(negated(x.c)); FixLink(x.bLink);
+	LoadCond(y, node.right); x.aLink := merged(y.aLink, x.aLink);
+	x.bLink := y.bLink; x.c := y.c
+END And;
+
+PROCEDURE Or(VAR x: Item; node: B.Node);
+	VAR y: Item;
+BEGIN LoadCond(x, node.left); x.bLink := curBlk;
+	OpenBlock(x.c); FixLink(x.aLink);
+	LoadCond(y, node.right); x.bLink := merged(y.bLink, x.bLink);
+	x.aLink := y.aLink; x.c := y.c
+END And;
 
 PROCEDURE MakeItem(VAR x: Item; obj: B.Object);
 	VAR objv: B.Var; node: B.Node;
@@ -625,7 +736,10 @@ BEGIN x.type := obj.type; x.ref := FALSE; x.a := 0; x.b := 0; x.c := 0;
 		IF node.op = S.plus THEN Add(x, node)
 		ELSIF node.op = S.minus THEN Subtract(x, node)
 		ELSIF node.op = S.times THEN Multiply(x, node)
-		ELSIF (node.op = S.div) OR (node.op = S.mod) THEN
+		ELSIF (node.op = S.div) OR (node.op = S.mod) THEN IntDiv(x, node)
+		ELSIF node.op = S.rdiv THEN Divide(x, node)
+		ELSIF node.op = S.and THEN And(x, node)
+		ELSIF node.op = S.or THEN Or(x, node)
 		END;
 		x.type := node.type
 	END;
