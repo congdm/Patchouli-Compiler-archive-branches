@@ -18,7 +18,7 @@ Modify the Oberon-07 language for the sake of adapting with the host system was 
 
 More complex = more affected by noise and error in real world.
 
-A good solution would be: let each language focus only one thing and using a common interface/protocol when interaction is needed. The desire for one omnipotent language which can do everything must be discarded.
+A good solution would be: let each language focus only on designed purpose and using a common interface/protocol when interaction is needed. The desire for one omnipotent language which can do everything must be discarded.
 
 ## Personal ranting
 
