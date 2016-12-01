@@ -17,6 +17,7 @@ CONST
 	tPtr* = 5; tProc* = 6; tArray* = 7; tRec* = 8; tStr* = 9; tNil* = 10;
 	tNull* = 31;
 	
+	typScalar* = {tInt, tBool, tSet, tChar, tReal, tPtr, tProc, tNil};
 	typEql* = {tBool, tSet, tPtr, tProc, tNil};
 	typCmp* = {tInt, tReal, tChar, tStr};
 	
@@ -152,6 +153,10 @@ END AppendStr;
 PROCEDURE IsOpenArray*(tp: Type): BOOLEAN;
 	RETURN (tp.form = tArray) & (tp.len < 0)
 END IsOpenArray;
+
+PROCEDURE IsStr*(t: Type): BOOLEAN;
+	RETURN (t = strType) OR (t.form = tArray) & (t.base.form = tChar)
+END IsStr;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
