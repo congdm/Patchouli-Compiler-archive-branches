@@ -183,7 +183,7 @@ BEGIN
 	NEW(p); p.class := cVar;
 	p.type := tp; p.lev := curLev;
 	p.varpar := varpar; INC(proc.nfpar);
-	p.ronly := ~varpar & (tp.form IN {B.tArray, B.tRec});
+	p.ronly := ~varpar & (tp.form IN {tArray, tRec});
 	RETURN p
 END NewPar;
 

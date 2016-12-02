@@ -150,7 +150,7 @@ BEGIN
 		IF ~ronly & x(B.Var).ronly THEN Mark('read only') END
 	ELSIF (x.class = B.cNode)
 		& ((op = S.arrow) OR (op = S.period)
-		OR (op = S.lparen) OR (op = S.lbrak)
+		OR (op = S.lparen) OR (op = S.lbrak))
 	THEN
 		IF ~ronly & x(B.Node).ronly THEN Mark('read only') END
 	ELSE Mark('not var')
@@ -369,7 +369,7 @@ END designator;
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
-PROCEDURE StdFunc(f: B.SProc): B.Node;
+PROCEDURE StdFunc(f: B.SProc): B.Object;
 	VAR par, par2: B.Node; x, y, z: B.Object;
 		ch: CHAR;
 BEGIN GetSym;
@@ -416,10 +416,10 @@ BEGIN GetSym;
 			ch := B.strbuf[y(B.Str).bufpos];
 			x := B.NewConst(B.intType, ORD(ch))
 		ELSIF x IS B.Const THEN x := B.NewConst(B.intType, x(B.Const).val)
-		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
+		ELSE
+			x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
 			x.type := B.intType
 		END
-		par := NewNode(S.par, y, NIL); x.right := par; x.type := B.intType
 	ELSIF f.id = B.sfCHR THEN y := expression0(); CheckInt(y);
 		IF y IS B.Const THEN x := B.NewConst(B.charType, y(B.Const).val)
 		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
@@ -861,10 +861,10 @@ BEGIN tp := B.intType;
 END FormalType;
 
 PROCEDURE FPSection(proc: B.Type);
-	VAR ronly, ref: BOOLEAN;
+	VAR ronly, varpar: BOOLEAN;
 		first, ident: B.Ident; tp: B.Type;
-BEGIN ref := FALSE;
-	IF sym = S.var THEN ref := TRUE; GetSym END;
+BEGIN
+	IF sym = S.var THEN varpar := TRUE; GetSym ELSE varpar := FALSE END;
 	IF sym = S.ident THEN
 		first := NewIdent(S.id); GetSym;
 		WHILE sym = S.comma DO GetSym;
@@ -877,9 +877,8 @@ BEGIN ref := FALSE;
 	ELSE Mark('No params?')
 	END;
 	Check0(S.colon); tp := FormalType(); ident := first;
-	ronly := ~ref & (tp.form IN {B.tArray, B.tRec});
 	WHILE ident # NIL DO
-		ident.obj := B.NewPar(proc, tp, ref, ronly);
+		ident.obj := B.NewPar(proc, tp, varpar);
 		ident.obj.ident := ident; ident := ident.next
 	END
 END FPSection;

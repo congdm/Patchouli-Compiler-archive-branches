@@ -470,12 +470,9 @@ END SetMemFile;
 PROCEDURE WriteMemFile*(VAR r: MemFileRider; x: BYTE);
 BEGIN
 	IF r.pos <= r.f.len THEN
-		IF size > 8 THEN size := 8 END;
-		IF size > 0 THEN
-			IF r.pos+1 > r.f.maxlen THEN ExtendMemFile(r.f, memFileBlk) END;
-			SYSTEM.PUT(r.f.ptr + r.pos, x); INC(r.pos);
-			IF r.pos > r.f.len THEN INC(r.f.len)
-		END
+		IF r.pos+1 > r.f.maxlen THEN ExtendMemFile(r.f, memFileBlk) END;
+		SYSTEM.PUT(r.f.ptr + r.pos, x); INC(r.pos);
+		IF r.pos > r.f.len THEN INC(r.f.len) END
 	ELSE r.eof := TRUE
 	END
 END WriteMemFile;
