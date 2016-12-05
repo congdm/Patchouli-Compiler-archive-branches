@@ -4,7 +4,7 @@ IMPORT
 	SYSTEM, Sys := BaseSys, Crypt, S := Scanner1;
 
 CONST
-	MaxExt* = 8; MaxRecTypes* = 512;
+	MaxExt* = 7; MaxRecTypes* = 512;
 	MaxImpMod* = 256; MaxExpTypes* = 1024; MaxModLev* = 255;
 	
 	(* Object class *)

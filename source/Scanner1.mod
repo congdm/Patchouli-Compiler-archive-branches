@@ -47,7 +47,7 @@ CONST
 	const* = 70; type* = 71; var* = 72; procedure* = 73; begin* = 74; 
 	import* = 76; module* = 77;
 	
-	call* = 100; par* = 101; sproc* = 102; designator* = 103; bitset* = 104;
+	call* = 100; par* = 101; sproc* = 102; bitset* = 104;
 	
 TYPE
 	IdStr* = ARRAY MaxIdLen+1 OF CHAR;

@@ -453,10 +453,10 @@ BEGIN
 	x := expression0(); CheckInt(x); G.CheckSetElement(x);
 	IF sym = S.upto THEN
 		GetSym; y := expression0(); CheckInt(y); G.CheckSetElement(y);
-		IF IsConst(x) & IsConst(y) THEN x := G.RangeSet(x, y)
+		IF IsConst(x) & IsConst(y) THEN x := G.ConstRangeSet(x, y)
 		ELSE x := NewNode(S.upto, x, y); x.type := B.setType
 		END;
-	ELSIF IsConst(x) THEN x := G.SingletonSet(x)
+	ELSIF IsConst(x) THEN x := G.ConstSingletonSet(x)
 	ELSE x := NewNode(S.bitset, x, NIL); x.type := B.setType
 	END;
 	RETURN x
@@ -467,18 +467,21 @@ PROCEDURE set(): B.Object;
 BEGIN
 	const := B.NewConst(B.setType, 0); GetSym;
 	IF sym # S.rbrace THEN y := element();
-		IF IsConst(y) THEN const := G.FoldConst(S.plus, const, y)
-		ELSE x := NewNode(S.plus, y, const); x.type := B.setType
+		IF ~IsConst(y) THEN x := y
+		ELSE const := G.FoldConst(S.plus, const, y)
 		END;
 		WHILE sym = S.comma DO GetSym;
 			IF sym # S.rbrace THEN y := element();
 				IF IsConst(y) THEN const := G.FoldConst(S.plus, const, y)
 				ELSIF x # NIL THEN
 					x := NewNode(S.plus, x, y); x.type := B.setType
-				ELSE x := NewNode(S.plus, y, const); x.type := B.setType
+				ELSE x := y
 				END
 			ELSE Mark('remove ,')
 			END
+		END;
+		IF (const(B.Const).val # 0) & (x # NIL) THEN
+			x := NewNode(S.plus, x, const); x.type := B.setType
 		END
 	END;
 	Check0(S.rbrace); IF x = NIL THEN x := const END;
