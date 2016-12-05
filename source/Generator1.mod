@@ -450,7 +450,7 @@ END EmitRep;
 (* Pass 1 *)
 
 PROCEDURE Pass1(obj: B.Object);
-	VAR node: B.Node; fpar: B.Ident;
+	VAR node, par1, par2: B.Node; fpar: B.Ident; fid: INTEGER;
 	
 	PROCEDURE ParNode(par: B.Node; fpar: B.Ident; n: INTEGER);
 		VAR i: INTEGER; varpar, openArr: BOOLEAN; ftype: B.Type;
@@ -490,13 +490,19 @@ BEGIN (* Pass1 *)
 			END;
 			IF (node.op = S.div) OR (node.op = S.mod) THEN
 				node.regUsed := node.regUsed + {reg_A, reg_D}
-			ELSIF (node.op = S.sproc) & (node.left(B.SProc).id IN B.sfShifts)
-				& ~(node.right IS B.Const) THEN
-				INCL(node.regUsed, reg_C); INCL(node.right.regUsed, reg_C)
-			ELSIF (node.op >= S.eql) & (node.op <= S.geq)
-				& B.IsStr(node.left.type) THEN
-				node.regUsed := node.regUsed + {reg_SI, reg_DI};
-				INCL(node.right.regUsed, reg_DI)
+			ELSIF node.op = S.sproc THEN
+				fid := node.left(B.SProc).id; par1 := node.right(B.Node);
+				IF par1.right # NIL THEN par2 := par1.right(B.Node) END;
+				IF (id IN B.sfShifts) & (par2.left IS B.Const) THEN
+					INCL(node.regUsed, reg_C);
+					INCL(par1.regUsed, reg_C);
+					INCL(par2.regUsed, reg_C)
+				END
+			ELSIF (node.op >= S.eql) & (node.op <= S.geq) THEN
+				IF B.IsStr(node.left.type) THEN
+					node.regUsed := node.regUsed + {reg_SI, reg_DI};
+					INCL(node.right.regUsed, reg_DI)
+				END
 			ELSIF node.op = S.upto THEN INCL(node.regUsed, reg_C)
 			END
 		ELSE Pass1(node.left);
@@ -777,12 +783,13 @@ BEGIN RefToRegI(x); SetRmOperand(x);
 	x.r := r; x.mode := mReg
 END LoadAdr;
 
-PROCEDURE ArrayLen(VAR len: Item; x: Item);
-BEGIN len.type := B.intType; len.ref := FALSE;
-	IF x.type = B.strType THEN len.mode := mImm; len.a := x.strlen
-	ELSIF B.IsOpenArray(x.type) THEN len.mode := mBP; len.a := x.c
-	ELSE len.mode := mImm; len.a := x.type.len
-	END
+PROCEDURE ArrayLen(VAR x: Item; obj: B.Object);
+BEGIN
+	IF obj IS B.Str THEN x.mode := mImm; x.a := obj(B.Str).len
+	ELSIF B.IsOpenArray(obj.type) THEN MakeItem0(x, obj); INC(x.a, 8)
+	ELSE x.mode := mImm; x.a := obj.type.len
+	END;
+	x.type := B.intType; x.ref := FALSE
 END ArrayLen;
 
 PROCEDURE TypeTag(VAR x: Item);
@@ -986,9 +993,9 @@ BEGIN oldStat := MkItmStat; ResetMkItmStat;
 		
 		cx := AllocReg3({}); EmitRR(XOR, cx, 4, cx); orgBlk := curBlk;
 		OpenBlock(0); EmitRI(ADDi, cx, 8, 1);
-		ArrayLen(len, x); Load(len); EmitRR(CMPd, cx, 8, len.r);
+		ArrayLen(len, node.left); Load(len); EmitRR(CMPd, cx, 8, len.r);
 		Trap(ccA, stringTrap); FreeReg(len.r);
-		ArrayLen(len, y); Load(len); EmitRR(CMPd, cx, 8, len.r);
+		ArrayLen(len, node.right); Load(len); EmitRR(CMPd, cx, 8, len.r);
 		Trap(ccA, stringTrap); FreeReg(len.r); FreeReg(cx);
 		
 		EmitBare(CMPSW); blk2 := curBlk; OpenBlock(ccNZ);
@@ -1038,12 +1045,13 @@ PROCEDURE Index(VAR x: Item; node: B.Node);
 BEGIN MakeItem0(x, node.left); bType := x.type.base; align := bType.align;
 	size := (bType.size + align - 1) DIV align * align;
 	IF node.right IS B.Const THEN idx := node.right(B.Const).val;
-		IF B.IsOpenArray(x.type) THEN ArrayLen(len, x); SetRmOperand(len);
+		IF B.IsOpenArray(x.type) THEN
+			ArrayLen(len, node.left); SetRmOperand(len);
 			EmitRmImm(CMPi, 8, idx); Trap(ccBE, arrayTrap)
 		END;
 		IF x.ref THEN INC(x.b, idx*size) ELSE INC(x.a, idx*size) END
 	ELSIF size > 0 THEN
-		RefToRegI(x); LoadRight(y, node); ArrayLen(len, x);
+		RefToRegI(x); LoadRight(y, node); ArrayLen(len, node.left);
 		IF len.mode = mImm THEN EmitRI(CMPi, y.r, 8, len.a)
 		ELSE SetRmOperand(len); EmitRegRm(CMPd, y.r, 8)
 		END;
@@ -1125,7 +1133,7 @@ BEGIN i := 1;
 		END
 	END;
 	IF i = 2 THEN ResetMkItmStat; SetBestReg(ParReg(n+1));
-		IF ftype.form = B.tArray THEN ArrayLen(y, x); Load(y);
+		IF ftype.form = B.tArray THEN ArrayLen(y, par.left); Load(y);
 		ELSIF (par.left IS B.Par) & par.left(B.Par).varpar THEN
 			MakeItem0(y, par.left); TypeTag(y); Load(y)
 		ELSE TypeDesc(y, x.type); LoadAdr(y)
@@ -1182,7 +1190,7 @@ BEGIN id := node.left(B.SProc).id;
 		EmitRI(ANDi, x.r, 4, 1); FreeReg(x.r); SetCond(x, ccNZ);
 		MkItmStat := oldStat
 	ELSIF id = B.sfLEN THEN (* x is open array *)
-		MakeItem0(x, obj1); INC(x.a, 8); x.type := B.intType; Load(x)
+		ArrayLen(x, obj1); Load(x)
 	ELSIF id IN B.sfShifts THEN
 		AvoidUsedBy(par1.right);
 	END
