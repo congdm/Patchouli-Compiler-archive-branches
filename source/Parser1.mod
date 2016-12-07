@@ -1110,11 +1110,11 @@ BEGIN
 			ident := NewIdent(par.name); NEW(parobj); ident.obj := parobj;
 			parobj^ := par.obj(B.Par)^; par := par.next
 		END;
-		ident := curProcIdent; DeclarationSequence(proc);
-		curProcIdent := ident; proc.decl := B.topScope.first;
 		IF curProcIdent # NIL THEN
 			curProcIdent.obj := proc; proc.ident := curProcIdent
-		END;		
+		END;
+		ident := curProcIdent; DeclarationSequence(proc);
+		curProcIdent := ident; proc.decl := B.topScope.first;		
 		IF sym = S.begin THEN GetSym; proc.statseq := StatementSequence() END;
 		IF sym = S.return THEN
 			IF tp.base = NIL THEN Mark('not function proc') END;
