@@ -452,7 +452,7 @@ BEGIN
 		ExtendMemFile(f1, newLen - f1.maxlen)
 	END;
 	SYSTEM.COPY(f2.ptr, f1.ptr + f1.len, f2.len);
-	DeleteMemFile(f2)
+	INC(f1.len, f2.len); DeleteMemFile(f2)
 END MergeMemFile;
 
 PROCEDURE MemFileLength*(f: MemFile): INTEGER;

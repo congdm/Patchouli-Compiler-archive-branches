@@ -196,6 +196,15 @@ BEGIN
 	IF ~(x.type.form IN forms) THEN Mark(ivlType) END
 END Check1;
 
+PROCEDURE StrToCharIfNeed(VAR x, y: B.Object);
+BEGIN
+	IF (x.type = B.charType) & (y IS B.Str) & (y(B.Str).len <= 2) THEN
+		y := B.NewConst(B.charType, ORD(B.strbuf[y(B.Str).bufpos]))
+	ELSIF (y.type = B.charType) & (x IS B.Str) & (x(B.Str).len <= 2) THEN
+		x := B.NewConst(B.charType, ORD(B.strbuf[x(B.Str).bufpos]))
+	END
+END StrToCharIfNeed;
+
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
@@ -412,17 +421,15 @@ BEGIN GetSym;
 		IF (y.type # B.strType) OR (y(B.Str).len > 2) THEN
 			Check1(y, {B.tSet, B.tBool, B.tChar})
 		END;
-		IF (y IS B.Str) & (y(B.Str).len <= 2) THEN
-			ch := B.strbuf[y(B.Str).bufpos];
-			x := B.NewConst(B.intType, ORD(ch))
-		ELSIF x IS B.Const THEN x := B.NewConst(B.intType, x(B.Const).val)
+		IF IsConst(y) THEN x := G.TypeTransferConst(B.intType, y)
 		ELSE
 			x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
 			x.type := B.intType
 		END
 	ELSIF f.id = B.sfCHR THEN y := expression0(); CheckInt(y);
-		IF y IS B.Const THEN x := B.NewConst(B.charType, y(B.Const).val)
-		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
+		IF y IS B.Const THEN x := G.TypeTransferConst(B.charType, y)
+		ELSE
+			x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
 			x.type := B.charType
 		END
 	ELSIF f.id = B.sfADR THEN y := designator(); CheckVar(y, TRUE);
@@ -439,9 +446,12 @@ BEGIN GetSym;
 		ELSIF y.type.form IN {B.tArray, B.tRec} THEN Mark('not scalar')
 		END;
 		Check0(S.comma); z := expression0();
-		IF z.type.form IN {B.tArray, B.tRec} THEN Mark('not scalar') END;
-		z := NewNode(S.par, z, NIL);
-		x := NewNode(S.sproc, f, NewNode(S.par, y, z)); x.type := y.type
+		IF z.type.form IN {B.tArray, B.tRec} THEN Mark('not scalar')
+		ELSIF (z IS B.Str) & (z(B.Str).len > 2) THEN Mark('not scalar')
+		END;
+		IF IsConst(z) THEN x := G.TypeTransferConst(y.type, z)
+		ELSE x := NewNode(S.sproc, f, NewNode(S.par, z, NIL)); x.type := y.type
+		END
 	END;
 	Check0(S.rparen);
 	RETURN x
@@ -582,6 +592,7 @@ BEGIN x := SimpleExpression();
 	IF (sym >= S.eql) & (sym <= S.geq) THEN
 		CheckLeft(x, sym); op := sym; GetSym; y := SimpleExpression();
 		IF ~CompTypes2(x.type, y.type) THEN Mark('invalid type') END;
+		StrToCharIfNeed(x, y);
 		IF IsConst(x) & IsConst(y) THEN x := G.FoldConst(op, x, y)
 		ELSE x := NewNode(op, x, y); x.type := B.boolType
 		END
@@ -706,7 +717,7 @@ BEGIN
 	if := NewNode(S.if, x, then);
 	IF sym = S.elsif THEN then.right := If(lev+1)
 	ELSIF sym = S.else THEN GetSym; then.right := StatementSequence0()
-	ELSE then.right := NewNode(S.null, NIL, NIL)
+	ELSE then.right := NIL
 	END;
 	IF lev = 0 THEN Check0(S.end) END;
 	RETURN if
@@ -719,7 +730,7 @@ BEGIN
 	do := NewNode(S.do, StatementSequence0(), NIL);
 	while := NewNode(S.while, x, do);
 	IF sym = S.elsif THEN do.right := While(lev+1)
-	ELSE do.right := NewNode(S.null, NIL, NIL)
+	ELSE do.right := NIL
 	END;
 	IF lev = 0 THEN Check0(S.end) END;
 	RETURN while
@@ -807,7 +818,7 @@ BEGIN
 					& (y.type.base = x.type.base)
 				THEN (*valid*) ELSE Mark('Invalid assignment')
 				END;
-				stat.left := NewNode(S.becomes, x, y)
+				StrToCharIfNeed(x, y); stat.left := NewNode(S.becomes, x, y)
 			ELSIF sym = S.eql THEN
 				Mark('Should be :='); GetSym; y := expression()
 			ELSIF x.type.form = B.tProc THEN
@@ -1078,7 +1089,7 @@ BEGIN
 			Check0(S.colon); tp := type(); ident := first;
 			WHILE ident # NIL DO
 				x := B.NewVar(tp); ident.obj := x; x.ident := ident;
-				IF proc = NIL THEN G.SetGlobalVarSize(x)
+				IF parentProc = NIL THEN G.SetGlobalVarSize(x)
 				ELSE G.SetProcVarSize(parentProc, x)
 				END;
 				ident := ident.next

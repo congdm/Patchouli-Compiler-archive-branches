@@ -271,7 +271,7 @@ BEGIN
 	exit := FALSE;
 	WHILE ~eof & ~exit DO
 		IF ch = '(' THEN Read;
-			IF ch = '*' THEN Read; SkipComment (lev + 1) END
+			IF ch = '*' THEN Read; SkipComment(lev + 1) END
 		ELSIF ch = '*' THEN Read;
 			IF ch = ')' THEN Read; exit := TRUE END
 		ELSE Read
