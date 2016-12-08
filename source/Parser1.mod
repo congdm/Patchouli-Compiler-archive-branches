@@ -668,7 +668,7 @@ BEGIN Check0(S.lparen);
 	ELSIF f.id = B.spLoadLibraryW THEN
 		x := designator(); CheckVar(x, FALSE);
 		IF x.type # B.intType THEN Mark('not INTEGER') END; Check0(S.comma);
-		y := expression(); IF y.type # B.strType THEN Mark('not string') END;
+		y := expression(); IF ~B.IsStr(y.type) THEN Mark('not string') END;
 		x := NewNode(S.becomes, x,
 			NewNode(S.call, B.LoadLibraryW, NewNode(S.par, y, NIL))
 		);
@@ -1091,7 +1091,8 @@ BEGIN
 		B.OpenScope; B.IncLev(1); par := tp.fields;
 		WHILE par # NIL DO
 			ident := NewIdent(par.name); NEW(parobj); ident.obj := parobj;
-			parobj^ := par.obj(B.Par)^; par := par.next
+			parobj^ := par.obj(B.Par)^; parobj.ident := ident;
+			INC(parobj.lev); par := par.next
 		END;
 		IF curProcIdent # NIL THEN
 			curProcIdent.obj := proc; proc.ident := curProcIdent

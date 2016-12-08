@@ -180,6 +180,10 @@ PROCEDURE IsOpenArray*(tp: Type): BOOLEAN;
 	RETURN (tp.form = tArray) & (tp.len < 0)
 END IsOpenArray;
 
+PROCEDURE IsNormalArray*(tp: Type): BOOLEAN;
+	RETURN (tp.form = tArray) & (tp.len >= 0)
+END IsNormalArray;
+
 PROCEDURE IsStr*(t: Type): BOOLEAN;
 	RETURN (t = strType) OR (t.form = tArray) & (t.base.form = tChar)
 END IsStr;
@@ -226,7 +230,7 @@ PROCEDURE NewStr*(str: String; slen: INTEGER): Str;
 BEGIN
 	NEW(x); x.class := cVar; x.ronly := TRUE;
 	x.type := strType; x.lev := curLev; x.len := slen;
-	IF str[0] # 0X (* need alloc buffer *) THEN 
+	IF x.lev >= -1 (* need to alloc buffer *) THEN 
 		IF strbufSize + slen >= LEN(strbuf) THEN
 			S.Mark('too many strings'); x.bufpos := -1
 		ELSE x.bufpos := strbufSize; strbufSize := strbufSize + slen;

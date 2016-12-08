@@ -105,10 +105,7 @@ BEGIN
 	IF bufPos < bufSize THEN
 		ch := CHR(buffer[bufPos] MOD 256); INC(bufPos); INC(filePos)
 	ELSE eof := TRUE; ch := 0X
-	END;
-	(*IF ch = CHR(13) THEN BaseSys.Console_WriteLn; INC(bufPos); INC(filePos)
-	ELSE BaseSys.Console_Write(ch)
-	END*)
+	END
 END Read;
 
 PROCEDURE Identifier(VAR sym: INTEGER);
