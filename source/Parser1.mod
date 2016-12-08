@@ -626,13 +626,13 @@ END ConstExpression;
 PROCEDURE StdProc(f: B.SProc): B.Object;
 	VAR x, y, z, t: B.Object;
 BEGIN Check0(S.lparen);
-	IF f.id IN {B.spINC, B.spDEC} THEN
+	IF (f.id = B.spINC) OR (f.id = B.spDEC) THEN
 		x := designator(); CheckInt(x); CheckVar(x, FALSE);
 		IF sym = S.comma THEN
 			GetSym; y := expression(); CheckInt(y); x := NewNode(f.id, x, y)
 		ELSE x := NewNode(f.id, x, NIL)
 		END
-	ELSIF f.id IN {B.spINCL, B.spEXCL} THEN
+	ELSIF (f.id = B.spINCL) OR (f.id = B.spEXCL) THEN
 		x := designator(); CheckSet(x); CheckVar(x, FALSE); Check0(S.comma);
 		y := expression(); CheckInt(y); x := NewNode(f.id, x, y)
 	ELSIF f.id = B.spNEW THEN

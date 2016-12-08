@@ -974,7 +974,7 @@ BEGIN RefToRegI(x);
 		IF x.mode # mReg THEN size := x.type.size;
 			IF x.mode # mRegI THEN r := AllocReg() ELSE r := x.r END;
 			IF x.mode = mImm THEN LoadImm(r, size, x.a)
-			ELSIF x.mode IN {mRegI, mSP, mIP, mBP} THEN SetRmOperand(x);
+			ELSIF x.mode IN {mRegI, mSP, mIP, mBP, mBX} THEN SetRmOperand(x);
 				IF size >= 4 THEN EmitRegRm(MOVd, r, size)
 				ELSE EmitMOVZX(r, size)
 				END
@@ -1335,8 +1335,7 @@ BEGIN
 	RETURN n
 END ParReg;
 
-PROCEDURE LoadParam(par: B.Node; n: INTEGER; ref: BOOLEAN);
-	VAR x: Item;
+PROCEDURE LoadParam(VAR x: Item; par: B.Node; n: INTEGER; ref: BOOLEAN);
 BEGIN AvoidUsedBy(par.right);
 	IF ~ref THEN
 		IF par.left.type.form # B.tReal THEN SetBestReg(ParReg(n))
@@ -1357,15 +1356,15 @@ PROCEDURE Parameter(par: B.Node; fpar: B.Ident; n: INTEGER);
 	VAR varpar: BOOLEAN; ftype: B.Type; x, y: Item; i: INTEGER; r: BYTE;
 BEGIN i := 1;
 	ResetMkItmStat; ftype := fpar.obj.type; varpar := fpar.obj(B.Par).varpar;
-	IF ftype.form = B.tArray THEN LoadParam(par, n, TRUE);
+	IF ftype.form = B.tArray THEN LoadParam(x, par, n, TRUE);
 		IF B.IsOpenArray(ftype) THEN INC(i) END
-	ELSIF ftype = B.strType THEN LoadParam(par, n, TRUE)
+	ELSIF ftype = B.strType THEN LoadParam(x, par, n, TRUE)
 	ELSIF (ftype.form = B.tRec) & varpar THEN
 		IF varpar OR (ftype.size > 8) OR ~(ftype.size IN {0, 1, 2, 4, 8}) THEN
-			LoadParam(par, n, TRUE); IF varpar THEN INC(i) END
-		ELSE LoadParam(par, n, FALSE)
+			LoadParam(x, par, n, TRUE); IF varpar THEN INC(i) END
+		ELSE LoadParam(x, par, n, FALSE)
 		END
-	ELSE LoadParam(par, n, FALSE)
+	ELSE LoadParam(x, par, n, FALSE)
 	END;
 	IF par.right # NIL THEN
 		Parameter(par.right(B.Node), fpar.next, n+i);
@@ -1658,12 +1657,10 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 		FreeReg(reg_C); FreeReg(reg_D); FreeReg(reg_R8); MakeItem0(x, obj1);
 		SetRmOperand(x); EmitRegRm(MOV, reg_A, 8); FreeReg2(x)
 	ELSIF id = S.spASSERT THEN
-		LoadCond(x, obj1); curBlk.link := x.aLink;
-		blk1 := curBlk; OpenBlock(negated(x.c));
-		MoveRI(reg_A, 1, assertTrap);
-		MoveRI(reg_C, 4, S.Pos()); EmitBare(INT3);
-		OpenBlock(255); blk1.jDst := curBlk;
-		FJump0(blk1); MergeFrom(blk1)
+		LoadCond(x, obj1); curBlk.link := x.bLink;
+		x.bLink := curBlk; OpenBlock(x.c); FixLink(x.aLink);
+		MoveRI(0, 1, assertTrap); MoveRI(1, 4, S.Pos()); EmitBare(INT3);
+		OpenBlock(255); FixLink(x.bLink)
 	ELSIF id = S.spPACK THEN
 		AvoidUsedBy(obj2); MakeItem0(x, obj1); r := AllocReg();
 		SetRmOperand(x); EmitRegRm(MOVd, r, 8); ResetMkItmStat;
@@ -1769,7 +1766,7 @@ BEGIN x.type := obj.type; x.ref := FALSE; x.a := 0; x.b := 0; x.c := 0;
 	ELSIF obj IS B.Var THEN objv := obj(B.Var); x.a := objv.adr;
 		IF objv.lev <= 0 THEN x.mode := mBX ELSE x.mode := mBP END;
 		IF objv.lev < 0 THEN x.ref := TRUE END;
-		IF objv IS B.Str THEN x.strlen := objv(B.Str).len
+		IF objv IS B.Str THEN x.mode := mBX; x.strlen := objv(B.Str).len
 		ELSIF objv IS B.Par THEN x.par := TRUE;
 			IF objv(B.Par).varpar OR (objv.type.form = B.tArray) THEN
 				x.ref := TRUE
@@ -1869,7 +1866,9 @@ BEGIN
 		curProc.homeSpace := 32
 	ELSE curProc.homeSpace := (curProc.homeSpace + 15) DIV 16 * 16
 	END;
-	EmitRI(SUBi, reg_SP, 8, n+curProc.homeSpace);
+	IF n+curProc.homeSpace # 0 THEN
+		EmitRI(SUBi, reg_SP, 8, n+curProc.homeSpace)
+	END;
 	
 	r := 0; i := 0; j := 0;
 	WHILE r < 16 DO
@@ -2398,7 +2397,7 @@ BEGIN
 		Sys.Write8(out, Linker.Kernel32Table[i]); INC(i)
 	END; i := 0;
 	WHILE i < B.modno DO imod := B.modList[i];
-		Sys.Seek(out, basefadr - imod.adr); j := 0;
+		Sys.Seek(out, basefadr + imod.adr); j := 0;
 		WHILE imod.name[j] # 0X DO
 			Sys.Write2(out, ORD(imod.name[j])); INC(j)
 		END;
@@ -2406,15 +2405,15 @@ BEGIN
 	END;
 	ident := B.strList;
 	WHILE ident # NIL DO x := ident.obj(B.Str);
-		Sys.Seek(out, basefadr - x.adr); i := 0;
+		Sys.Seek(out, basefadr + x.adr); i := 0;
 		WHILE i < x.len DO
-			Sys.Write2(out, ORD(B.strbuf[x.bufpos])); INC(i)
+			Sys.Write2(out, ORD(B.strbuf[x.bufpos+i])); INC(i)
 		END;
 		ident := ident.next
 	END;
 	t := B.recList;
 	WHILE t # NIL DO
-		Sys.Seek(out, basefadr - t.type.adr + 8 + B.MaxExt*8);
+		Sys.Seek(out, basefadr + t.type.adr + 8 + B.MaxExt*8);
 		IF t.type.nptr > 0 THEN Write_pointer_offset(0, t.type) END;
 		Sys.Write8(out, -1); t := t.next
 	END
@@ -2490,7 +2489,7 @@ BEGIN i := 0;
 END Write_SectionHeader;
 
 PROCEDURE Write_PEHeader;
-	VAR k: INTEGER;
+	VAR k, nSection: INTEGER;
 BEGIN
 	Sys.Seek(out, 0);
 	Sys.Write2(out, 5A4DH);
@@ -2500,7 +2499,8 @@ BEGIN
 	Sys.Write4(out, 4550H);
 	
 	Sys.Write2(out, 8664H); (* Machine = AMD64/Intel 64 *)
-	Sys.Write2(out, 6); (* NumberOfSections *)
+	IF Linker.bss_size = 0 THEN nSection := 5 ELSE nSection := 6 END;
+	Sys.Write2(out, nSection); (* NumberOfSections *)
 	Sys.SeekRel(out, 4 * 3);
 	Sys.Write2(out, 240);
 	
@@ -2555,9 +2555,11 @@ BEGIN
 	Sys.Write4(out, 12);
 	Sys.SeekRel(out, 8 * 10);
 	
-	Write_SectionHeader (
-		'.bss', -1073741696, Linker.bss_rva, 0, Linker.bss_size, 0
-	);
+	IF Linker.bss_size > 0 THEN
+		Write_SectionHeader(
+			'.bss', -1073741696, Linker.bss_rva, 0, Linker.bss_size, 0
+		)
+	END;
 	Write_SectionHeader (
 		'.data', -1073741760, Linker.data_rva, Linker.data_rawsize,
 		Linker.data_size, Linker.data_fadr

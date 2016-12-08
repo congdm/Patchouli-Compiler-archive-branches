@@ -165,6 +165,14 @@ BEGIN i := 0; WHILE dst[i] # 0X DO INC(i) END;
 	dst[i+k] := 0X
 END AppendStr;
 
+PROCEDURE SetCompilerFlag(pragma: ARRAY OF CHAR);
+BEGIN
+	IF pragma = 'MAIN' THEN CplFlag.main := TRUE
+	ELSIF pragma = 'CONSOLE' THEN
+		CplFlag.main := TRUE; CplFlag.console := TRUE
+	END
+END SetCompilerFlag;
+
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
@@ -766,6 +774,7 @@ END Init;
 
 BEGIN
 	ExportType0 := ExportType; ImportType0 := ImportType;
+	S.InstallSetCompilerFlag(SetCompilerFlag);
 
 	preTypeNo := 0; predefinedTypes[0] := NIL; curLev := -1;
 	NewPredefinedType(intType, tInt);
@@ -776,7 +785,5 @@ BEGIN
 	NewPredefinedType(nilType, tNil);
 	NewPredefinedType(realType, tReal);
 	NewPredefinedType(strType, tStr);
-	NewPredefinedType(noType, tNull);
-	
-	
+	NewPredefinedType(noType, tNull)
 END Base1.

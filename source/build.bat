@@ -9,3 +9,16 @@
 ..\bin\AyaCompile Parser.mod
 ..\bin\AyaCompile Parser2.mod
 ..\bin\AyaCompile AyaCompile.mod
+
+echo off
+move /Y Strings.dll ..\bin\
+move /Y Crypt.dll ..\bin\
+move /Y Console.dll ..\bin\
+move /Y Base.dll ..\bin\
+move /Y Scanner.dll ..\bin\
+move /Y SymTable.dll ..\bin\
+move /Y Generator.dll ..\bin\
+move /Y Parser.dll ..\bin\
+move /Y Parser2.dll ..\bin\
+move /Y AyaCompile.exe ..\bin\
+echo on

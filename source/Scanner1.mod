@@ -61,6 +61,8 @@ CONST
 TYPE
 	IdStr* = ARRAY MaxIdLen+1 OF CHAR;
 	Str* = ARRAY MaxStrLen+1 OF CHAR;
+	
+	SetCompilerFlagProc* = PROCEDURE(pragma: ARRAY OF CHAR);
 
 VAR
 	ival*, slen*: INTEGER;
@@ -78,6 +80,8 @@ VAR
 	
 	buffer: ARRAY 100000H OF BYTE;
 	bufPos, lastPos, filePos, bufSize: INTEGER;
+	
+	SetCompilerFlag: SetCompilerFlagProc;
 	
 PROCEDURE Pos*() : INTEGER;
 	RETURN filePos
@@ -257,26 +261,23 @@ BEGIN
     END
 END Number;
 
-PROCEDURE SkipComment (lev: INTEGER);
+PROCEDURE SkipComment(lev: INTEGER);
 	VAR exit: BOOLEAN;
 	
-	(*
 	PROCEDURE SetPragma;
-		VAR pragma: Base.String; i: INTEGER;
-	BEGIN
-		Read; i := 0;
+		VAR pragma: Str; i: INTEGER;
+	BEGIN Read; i := 0;
 		WHILE (i < LEN(pragma) - 1) & (ch # '*') & ~eof DO
-			pragma[i] := ch; Read; INC (i)
+			pragma[i] := ch; Read; INC(i)
 		END;
 		pragma[i] := 0X;
-		IF ch = '*' THEN Base.SetCompilerFlag (pragma)
-		ELSE Mark ('Wrong compiler directive')
+		IF ch = '*' THEN SetCompilerFlag(pragma)
+		ELSE Mark('Incorrect compiler directive')
 		END
 	END SetPragma;
-	*)
 	
 BEGIN
-	(* IF (ch = '$') & (lev = 0) THEN SetPragma END; *)
+	IF (ch = '$') & (lev = 0) THEN SetPragma END;
 	exit := FALSE;
 	WHILE ~eof & ~exit DO
 		IF ch = '(' THEN Read;
@@ -354,6 +355,10 @@ BEGIN
 	srcfile := file; BaseSys.Seek(file, pos); filePos := pos; bufPos := 0;
 	BaseSys.ReadBytes(file, buffer, bufSize); Read
 END Init;
+
+PROCEDURE InstallSetCompilerFlag*(proc: SetCompilerFlagProc);
+BEGIN SetCompilerFlag := proc
+END InstallSetCompilerFlag;
 
 PROCEDURE EnterKW(sym: INTEGER; name: IdStr);
 BEGIN keyTab[k].id := name; keyTab[k].sym := sym; INC(k)
