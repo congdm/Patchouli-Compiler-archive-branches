@@ -2309,7 +2309,7 @@ BEGIN
 	B.nilType.size := 8; B.nilType.align := 8;
 
 	Linker.startTime := Sys.GetTickCount();
-	Sys.Rewrite(out, tempOutputName); Sys.Seek(out, 400H)
+	Sys.Rewrite(out, tempOutputName);
 END Init;
 
 PROCEDURE Align(VAR a: INTEGER; align: INTEGER);
@@ -2580,22 +2580,13 @@ BEGIN
 	);
 END Write_PEHeader;
 
-PROCEDURE Debug;
-	VAR file: Sys.File; b: BYTE; rider: Sys.MemFileRider; blk: Block;
-BEGIN
-	Sys.Rewrite(file, 'Test.dat'); curProc := procList;
-	WHILE curProc # NIL DO blk := curProc.blk;
-		WHILE blk # NIL DO
-			Sys.SetMemFile(rider, blk.code, 0);
-			REPEAT Sys.ReadMemFile(rider, b);
-				IF ~rider.eof THEN Sys.Write1(file, b) END
-			UNTIL rider.eof;
-			blk := blk.next
-		END;
-		curProc := curProc.next
-	END;
-	Sys.Close(file)
-END Debug;
+PROCEDURE Write_code_section;
+	VAR b: BYTE; rider: Sys.MemFileRider; blk: Block;
+BEGIN blk := procList.blk; Sys.SetMemFile(rider, blk.code, 0);
+	REPEAT Sys.ReadMemFile(rider, b);
+		IF ~rider.eof THEN Sys.Write1(out, b) END
+	UNTIL rider.eof; ASSERT(blk.next = NIL)
+END Write_code_section;
 
 PROCEDURE Generate*(modinit: B.Node);
 	VAR modkey: B.ModuleKey; n: INTEGER; str: B.String;
@@ -2638,8 +2629,10 @@ BEGIN
 	Linker.reloc_fadr := Linker.data_fadr + Linker.data_rawsize;
 	Linker.edata_fadr := Linker.reloc_fadr + 200H;
 	
-	Write_idata_section; Write_data_section; Write_reloc_section;
-	Write_edata_section; Write_PEHeader; Sys.Close(out);
+	Write_idata_section; Write_data_section;
+	Write_reloc_section; Write_edata_section; Write_PEHeader;
+	Sys.Seek(out, 400H); Write_code_section;
+	Sys.Close(out);
 	
 	(* Rename files *)
 	str[0] := 0X; B.AppendStr(modid, str);
