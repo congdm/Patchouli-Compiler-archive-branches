@@ -2556,7 +2556,7 @@ BEGIN
 	Sys.SeekRel(out, 8 * 10);
 	
 	Write_SectionHeader (
-		'.bss', -1069547392, Linker.bss_rva, 0, Linker.bss_size, 0
+		'.bss', -1073741696, Linker.bss_rva, 0, Linker.bss_size, 0
 	);
 	Write_SectionHeader (
 		'.data', -1073741760, Linker.data_rva, Linker.data_rawsize,
