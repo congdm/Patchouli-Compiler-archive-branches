@@ -46,6 +46,7 @@ BEGIN
 	ELSIF expect = S.until THEN Mark('No UNTIL')
 	ELSIF expect = S.becomes THEN Mark('No :=')
 	ELSIF expect = S.period THEN Mark('No .')
+	ELSIF expect = S.comma THEN Mark('No ,')
 	ELSE ASSERT(FALSE)
 	END;
 END Check0;
@@ -234,28 +235,30 @@ END NewNode;
 (* -------------------------------------------------------------------------- *)
 
 PROCEDURE FindIdent(): B.Object;
-	VAR x: B.Object; ident: B.Ident; found: BOOLEAN;
-BEGIN ident := B.topScope.first; found := FALSE;
-	WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
-	IF ident # NIL THEN x := ident.obj; found := TRUE
-	ELSIF (curProcIdent # NIL) & (S.id = curProcIdent.name) THEN
-		x := curProcIdent.obj; found := TRUE
-	ELSE ident := B.universe.first;
+	VAR found: BOOLEAN; xlev: INTEGER;
+		x: B.Object; ident: B.Ident; scope: B.Scope;
+BEGIN scope := B.topScope; found := FALSE;
+	WHILE (scope # NIL) & ~found DO ident := scope.first; 
 		WHILE (ident # NIL) & (ident.name # S.id) DO ident := ident.next END;
-		IF ident # NIL THEN x := ident.obj; found := TRUE
-		ELSE Mark('identifier not found')
+		IF ident # NIL THEN x := ident.obj; found := TRUE;
+			IF x = NIL THEN Mark('identifier undefined')
+			ELSIF x IS B.Var THEN xlev := x(B.Var).lev;
+				IF (xlev > 0) & (xlev # B.curLev) THEN
+					Mark('Access to non strictly local variable')
+				END
+			END
+		ELSE scope := scope.dsc
 		END
 	END;
-	IF found & (x = NIL) THEN Mark('identifier undefined') END;
 	RETURN x
 END FindIdent;
 
 PROCEDURE qualident(): B.Object;
-	VAR x: B.Object; ident: B.Ident;
+	VAR x: B.Object; mod: B.Module; ident: B.Ident;
 BEGIN x := FindIdent(); GetSym;
 	IF (x # NIL) & (x IS B.Module) & (sym = S.period) THEN GetSym;
 		IF sym = S.ident THEN
-			ident := x(B.Module).first;
+			mod := x(B.Module); ident := mod.first;
 			WHILE (ident # NIL) & (ident.name # S.id) DO
 				ident := ident.next
 			END;
@@ -263,7 +266,7 @@ BEGIN x := FindIdent(); GetSym;
 				IF (x IS B.Var) & (x(B.Var).lev < -1) & (x(B.Var).adr = 0)
 				OR (x IS B.Proc) & (x(B.Proc).lev < -1) & (x(B.Proc).adr = 0)
 				OR (x.class = B.cType) & (x.type.lev < -1) & (x.type.adr = 0)
-				THEN G.AllocImport(x)
+				THEN G.AllocImport(x, mod)
 				END
 			ELSE Mark('not found'); x := NIL
 			END; GetSym
@@ -384,63 +387,54 @@ PROCEDURE StdFunc(f: B.SProc): B.Object;
 BEGIN GetSym;
 	IF f.id = B.sfABS THEN y := expression0(); Check1(y, {B.tInt, B.tReal});
 		IF y IS B.Const THEN x := G.AbsConst(y)
-		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
+		ELSE x := NewNode(S.sfABS, y, NIL);
 			IF y.type.form = B.tInt THEN x.type := B.intType
 			ELSE x.type := y.type
 			END
 		END
 	ELSIF f.id = B.sfODD THEN y := expression0(); CheckInt(y);
 		IF y IS B.Const THEN x := G.OddConst(y)
-		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
-			x.type := B.boolType
+		ELSE x := NewNode(S.sfODD, y, NIL); x.type := B.boolType
 		END
 	ELSIF f.id = B.sfLEN THEN y := designator(); Check1(y, {B.tArray});
 		IF y.type.len >= 0 THEN x := B.NewConst(B.intType, y.type.len)
-		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
-			x.type := B.intType
+		ELSE x := NewNode(S.sfLEN, y, NIL); x.type := B.intType
 		END
-	ELSIF f.id IN B.sfShifts THEN
+	ELSIF (f.id >= B.sfLSL) & (f.id <= B.sfROR) THEN
 		y := expression0(); CheckInt(y);
 		Check0(S.comma); z := expression0(); CheckInt(z);
 		IF (y IS B.Const) & (z IS B.Const) THEN x := G.ShiftConst(f.id, y, z)
-		ELSE z := NewNode(S.par, z, NIL);
-			x := NewNode(S.sproc, f, NewNode(S.par, y, z));
-			x.type := B.intType
+		ELSE x := NewNode(f.id, y, z); x.type := B.intType
 		END
 	ELSIF f.id = B.sfFLOOR THEN y := expression0(); CheckReal(y);
 		IF y IS B.Const THEN x := G.FloorConst(y)
-		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
-			x.type := B.intType
+		ELSE x := NewNode(S.sfFLOOR, y, NIL); x.type := B.intType
 		END
 	ELSIF f.id = B.sfFLT THEN y := expression0(); CheckInt(y);
 		IF y IS B.Const THEN x := G.FltConst(y)
-		ELSE x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
-			x.type := B.intType
+		ELSE x := NewNode(S.sfFLT, y, NIL); x.type := B.realType
 		END
 	ELSIF f.id = B.sfORD THEN y := expression0();
 		IF (y.type # B.strType) OR (y(B.Str).len > 2) THEN
 			Check1(y, {B.tSet, B.tBool, B.tChar})
 		END;
 		IF IsConst(y) THEN x := G.TypeTransferConst(B.intType, y)
-		ELSE
-			x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
-			x.type := B.intType
+		ELSE x := NewNode(S.sfORD, y, NIL); x.type := B.intType
 		END
 	ELSIF f.id = B.sfCHR THEN y := expression0(); CheckInt(y);
 		IF y IS B.Const THEN x := G.TypeTransferConst(B.charType, y)
-		ELSE
-			x := NewNode(S.sproc, f, NewNode(S.par, y, NIL));
-			x.type := B.charType
+		ELSE x := NewNode(S.sfCHR, y, NIL); x.type := B.charType
 		END
-	ELSIF f.id = B.sfADR THEN y := designator(); CheckVar(y, TRUE);
-		x := NewNode(S.sproc, f, NewNode(S.par, y, NIL)); x.type := B.intType
+	ELSIF f.id = B.sfADR THEN
+		y := designator(); CheckVar(y, TRUE);
+		x := NewNode(S.sfADR, y, NIL); x.type := B.intType
 	ELSIF f.id = B.sfSIZE THEN y := qualident();
 		IF y.class # B.cType THEN Mark('not type') END;
 		x := B.NewConst(B.intType, y.type.size)
 	ELSIF f.id = B.sfBIT THEN
-		y := expression0(); CheckInt(y); Check0(S.comma);
-		z := expression0(); CheckInt(z); z := NewNode(S.par, z, NIL);
-		x := NewNode(S.sproc, f, NewNode(S.par, y, z)); x.type := B.boolType
+		y := expression0(); CheckInt(y);
+		Check0(S.comma); z := expression0(); CheckInt(z);
+		x := NewNode(S.sfBIT, y, z); x.type := B.boolType
 	ELSIF f.id = B.sfVAL THEN y := qualident();
 		IF y.class # B.cType THEN Mark('not type')
 		ELSIF y.type.form IN {B.tArray, B.tRec} THEN Mark('not scalar')
@@ -450,7 +444,7 @@ BEGIN GetSym;
 		ELSIF (z IS B.Str) & (z(B.Str).len > 2) THEN Mark('not scalar')
 		END;
 		IF IsConst(z) THEN x := G.TypeTransferConst(y.type, z)
-		ELSE x := NewNode(S.sproc, f, NewNode(S.par, z, NIL)); x.type := y.type
+		ELSE x := NewNode(S.sfVAL, z, NIL); x.type := y.type
 		END
 	END;
 	Check0(S.rparen);
@@ -629,80 +623,69 @@ END ConstExpression;
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
-PROCEDURE StdProc(f: B.SProc): B.Node;
-	VAR x, par, par2: B.Node; y, t: B.Object;
-BEGIN
-	Check0(S.lparen); x := NewNode(S.sproc, f, NIL);
+PROCEDURE StdProc(f: B.SProc): B.Object;
+	VAR x, y, z, t: B.Object;
+BEGIN Check0(S.lparen);
 	IF f.id IN {B.spINC, B.spDEC} THEN
-		y := designator(); CheckInt(y); CheckVar(y, FALSE);
-		par := NewNode(S.par, y, NIL); x.right := par;
+		x := designator(); CheckInt(x); CheckVar(x, FALSE);
 		IF sym = S.comma THEN
-			GetSym; y := expression(); CheckInt(y);
-			par2 := NewNode(S.par, y, NIL); par.right := par2
+			GetSym; y := expression(); CheckInt(y); x := NewNode(f.id, x, y)
+		ELSE x := NewNode(f.id, x, NIL)
 		END
 	ELSIF f.id IN {B.spINCL, B.spEXCL} THEN
-		y := designator(); CheckSet(y); CheckVar(y, FALSE);
-		par := NewNode(S.par, y, NIL); x.right := par;
-		IF sym = S.comma THEN
-			GetSym; y := expression(); CheckInt(y);
-			par2 := NewNode(S.par, y, NIL); par.right := par2
-		END
+		x := designator(); CheckSet(x); CheckVar(x, FALSE); Check0(S.comma);
+		y := expression(); CheckInt(y); x := NewNode(f.id, x, y)
 	ELSIF f.id = B.spNEW THEN
-		y := designator(); Check1(y, {B.tPtr}); CheckVar(y, FALSE);
-		IF (y.type.lev < -1) & (y.type.base.adr = 0) THEN
-			IF y.type.base.obj # NIL THEN G.AllocImport(y.type.base.obj)
-			ELSE t := B.NewTypeObj(y.type.base); G.AllocImport(t)
-			END
+		x := designator(); Check1(x, {B.tPtr}); CheckVar(x, FALSE);
+		IF (x.type.lev < -1) & (x.type.base.adr = 0) THEN
+			t := x.type.base.obj;
+			IF t = NIL THEN t := B.NewTypeObj(x.type.base) END;
+			G.AllocImport(t, B.ModByLev(x.type.lev))
 		END;
-		par := NewNode(S.par, y, NIL); x.right := par
+		x := NewNode(S.spNEW, x, NIL)
 	ELSIF f.id = B.spASSERT THEN
-		y := expression(); CheckBool(y);
-		par := NewNode(S.par, y, NIL); x.right := par
+		x := expression(); CheckBool(x); x := NewNode(S.spASSERT, x, NIL)
 	ELSIF f.id = B.spPACK THEN
-		y := designator(); CheckReal(y); CheckVar(y, FALSE);
-		par := NewNode(S.par, y, NIL); x.right := par;
-		IF sym = S.comma THEN
-			GetSym; y := expression(); CheckInt(y);
-			par2 := NewNode(S.par, y, NIL); par.right := par2
-		END
+		x := designator(); CheckReal(x); CheckVar(x, FALSE); Check0(S.comma);
+		y := expression(); CheckInt(y); x := NewNode(S.spPACK, x, y)
 	ELSIF f.id = B.spUNPK THEN
+		x := designator(); CheckInt(x); CheckVar(x, FALSE); Check0(S.comma);
 		y := designator(); CheckInt(y); CheckVar(y, FALSE);
-		par := NewNode(S.par, y, NIL); x.right := par;
-		IF sym = S.comma THEN
-			GetSym; y := designator(); CheckInt(y); CheckVar(y, FALSE);
-			par2 := NewNode(S.par, y, NIL); par.right := par2
-		END
+		x := NewNode(S.spUNPK, x, y)
 	ELSIF f.id = B.spGET THEN
-		y := expression(); CheckInt(y);
-		par := NewNode(S.par, y, NIL); x.right := par;
-		Check0(S.comma); y := designator(); CheckVar(y, FALSE);
-		IF y.type.form IN {B.tArray, B.tRec} THEN Mark('invalid type') END;
-		par2 := NewNode(S.par, y, NIL); par.right := par2
+		x := expression(); CheckInt(x); Check0(S.comma);
+		y := designator(); CheckVar(y, FALSE); x := NewNode(S.spGET, x, y);
+		IF y.type.form IN {B.tArray, B.tRec} THEN Mark('invalid type') END
 	ELSIF f.id = B.spPUT THEN
-		y := expression(); CheckInt(y);
-		par := NewNode(S.par, y, NIL); x.right := par;
-		Check0(S.comma); y := expression();
-		IF y.type.form IN {B.tArray, B.tRec} THEN Mark('invalid type') END;
-		par2 := NewNode(S.par, y, NIL); par.right := par2
+		x := expression(); CheckInt(x); Check0(S.comma);
+		y := expression(); x := NewNode(S.spPUT, x, y);
+		IF y.type.form IN {B.tArray, B.tRec} THEN Mark('invalid type') END
 	ELSIF f.id = B.spCOPY THEN
-		y := expression(); CheckInt(y);
-		par := NewNode(S.par, y, NIL); x.right := par;
-		Check0(S.comma); y := expression(); CheckInt(y);
-		par2 := NewNode(S.par, y, NIL); par.right := par2; par := par2;
-		Check0(S.comma); y := expression(); CheckInt(y);
-		par2 := NewNode(S.par, y, NIL); par.right := par2
+		x := expression(); CheckInt(x); Check0(S.comma);
+		y := expression(); CheckInt(y); Check0(S.comma);
+		z := expression(); CheckInt(z);
+		x := NewNode(S.spCOPY, x, NewNode(S.null, y, z))
 	ELSIF f.id = B.spLoadLibraryW THEN
-		y := expression();
-		par := NewNode(S.par, y, NIL); x.right := par;
-		Check0(S.comma); y := expression();
-		par2 := NewNode(S.par, y, NIL); par.right := par2
+		x := designator(); CheckVar(x, FALSE);
+		IF x.type # B.intType THEN Mark('not INTEGER') END; Check0(S.comma);
+		y := expression(); IF y.type # B.strType THEN Mark('not string') END;
+		x := NewNode(S.becomes, x,
+			NewNode(S.call, B.LoadLibraryW, NewNode(S.par, y, NIL))
+		);
+		x(B.Node).right.type := B.intType
 	ELSIF f.id = B.spGetProcAddress THEN
-		y := expression();
-		par := NewNode(S.par, y, NIL); x.right := par;
-		Check0(S.comma); y := expression();
-		par2 := NewNode(S.par, y, NIL); par.right := par2; par := par2;
-		Check0(S.comma); y := expression();
-		par2 := NewNode(S.par, y, NIL); par.right := par2
+		x := designator(); CheckVar(x, FALSE);
+		IF (x.type.form # B.tProc) & (x.type # B.intType) THEN
+			Mark('not INTEGER or procedure variable')
+		END; Check0(S.comma);
+		y := expression(); CheckInt(y); Check0(S.comma);
+		z := expression(); CheckInt(z);
+		x := NewNode(S.becomes, x,
+			NewNode(S.call, B.GetProcAddress,
+				NewNode(S.par, y, NewNode(S.par, z, NIL))
+			)
+		);
+		x(B.Node).right.type := B.intType
 	ELSE Mark('unsupported');
 	END;
 	Check0(S.rparen);

@@ -49,6 +49,15 @@ CONST
 	
 	call* = 100; par* = 101; sproc* = 102; bitset* = 104;
 	
+	sfABS* = 110; sfODD* = 111; sfLEN* = 112;
+	sfLSL* = 113; sfASR* = 114; sfROR* = 115;
+	sfFLOOR* = 116; sfFLT* = 117; sfORD* = 118; sfCHR* = 119;
+	sfADR* = 120; sfBIT* = 121; sfVAL* = 122;
+	
+	spINC* = 130; spDEC* = 131; spINCL* = 132; spEXCL* = 133;
+	spNEW* = 134; spASSERT* = 135; spPACK* = 136; spUNPK* = 137;
+	spGET* = 138; spPUT* = 139; spCOPY* = 140;
+	
 TYPE
 	IdStr* = ARRAY MaxIdLen+1 OF CHAR;
 	Str* = ARRAY MaxStrLen+1 OF CHAR;

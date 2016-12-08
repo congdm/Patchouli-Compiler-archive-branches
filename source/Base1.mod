@@ -22,15 +22,24 @@ CONST
 	typCmp* = {tInt, tReal, tChar, tStr};
 	
 	(* SProc id *)
-	spINC* = 0; spDEC* = 1; spINCL* = 2; spEXCL* = 3; spNEW* = 4;
-	spASSERT* = 5; spPACK* = 6; spUNPK* = 7;
-	sfABS* = 8; sfODD* = 9; sfLEN* = 10; sfLSL* = 11; sfASR* = 12;
-	sfROR* = 13; sfFLOOR* = 14; sfFLT* = 15; sfORD* = 16; sfCHR* = 17;
-	sfShifts* = {sfROR, sfLSL, sfASR};
+	spINC* = S.spINC; spDEC* = S.spDEC; spINCL* = S.spINCL; spEXCL* = S.spEXCL;
+	spNEW* = 4; spASSERT* = 5; spPACK* = 6; spUNPK* = 7;
+	sfABS* = 8; sfODD* = 9; sfLEN* = 10;
+	sfLSL* = S.sfLSL; sfASR* = S.sfASR; sfROR* = S.sfROR;
+	sfFLOOR* = 14; sfFLT* = 15; sfORD* = 16; sfCHR* = 17;
 	
 	spGET* = 18; spPUT* = 19; spCOPY* = 20;
 	spLoadLibraryW* = 21; spGetProcAddress* = 22;
 	sfADR* = 23; sfSIZE* = 24; sfBIT* = 25; sfVAL* = 26;
+	
+	(* Win32 specifics *)
+	HeapHandle* = -64;
+	ExitProcess* = -56;
+	LoadLibraryW_adr* = -48;
+	GetProcAddress_adr* = -40;
+	GetProcessHeap* = -32;
+	HeapAlloc* = -24;
+	HeapFree* = -16;
 	
 TYPE
 	IdStr* = S.IdStr;
@@ -42,10 +51,13 @@ TYPE
     Node* = POINTER TO NodeDesc;
     Ident* = POINTER TO IdentDesc;
 	
-	TypeList* = POINTER TO RECORD type*: Type; next*: TypeList END;
+	TypeList* = POINTER TO RECORD
+		type*: Type; a*: INTEGER; next*: TypeList
+	END;
 	
 	ObjDesc* = EXTENSIBLE RECORD
-		class*: INTEGER; type*: Type; ident*: Ident; regUsed*, xRegUsed*: SET
+		class*: INTEGER; type*: Type; ident*: Ident;
+		regUsed*, xRegUsed*: SET
 	END;
 	Const* = POINTER TO EXTENSIBLE RECORD (ObjDesc) val*: INTEGER END;
 	Field* = POINTER TO EXTENSIBLE RECORD (ObjDesc) off*: INTEGER END;
@@ -63,9 +75,9 @@ TYPE
 		bufpos*, len*: INTEGER
 	END;
 	Module* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
-		path*: String; name*: IdStr;
+		path*: String; name*: IdStr; 
 		key*: ModuleKey; lev*, adr*: INTEGER;
-		first*: Ident; types*: TypeList
+		first*, impList*: Ident; types*: TypeList
 	END;
 	SProc* = POINTER TO EXTENSIBLE RECORD (ObjDesc) id*: INTEGER END;
 	
@@ -95,16 +107,22 @@ VAR
 	boolType*, setType*, charType*, nilType*, strType*: Type;
 	noType*: Type; predefinedTypes: ARRAY 32 OF Type;
 	
+	LoadLibraryW*, GetProcAddress*: Proc;
+	
 	topScope*, universe*, systemScope: Scope;
 	curLev*, modlev*: INTEGER; modid*: IdStr; modkey*: ModuleKey;
 	expList*, strList*: Ident; recList*: TypeList;
 	
 	symfile: Sys.File;
-	refno, preTypeNo, expno, modno*: INTEGER;
+	refno, preTypeNo, expno*, modno*: INTEGER;
 	impTypes: ARRAY MaxExpTypes OF Type;
 	modList*: ARRAY MaxImpMod OF Module;
 	
 	strbuf*: ARRAY 100000H OF CHAR; strbufSize*: INTEGER;
+	
+	CplFlag* : RECORD
+		main*, console*: BOOLEAN
+	END;
 	
 	ExportType0: PROCEDURE(typ: Type);
 	ImportType0: PROCEDURE(VAR typ: Type);
@@ -140,7 +158,7 @@ BEGIN n := 0; i := 1; k := 1;
 	UNTIL finish
 END ReadInt;
 
-PROCEDURE AppendStr(ext: ARRAY OF CHAR; VAR dst: ARRAY OF CHAR);
+PROCEDURE AppendStr*(ext: ARRAY OF CHAR; VAR dst: ARRAY OF CHAR);
 	VAR i, k: INTEGER;
 BEGIN i := 0; WHILE dst[i] # 0X DO INC(i) END;
 	k := 0; WHILE ext[k] # 0X DO dst[i+k] := ext[k]; INC(k) END;
@@ -321,6 +339,10 @@ END Enter;
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 (* Export symbol file *)
+
+PROCEDURE ModByLev*(lev: INTEGER): Module;
+	RETURN modList[-lev-2]
+END ModByLev;
 
 PROCEDURE NewExport(VAR ident: Ident);
 	VAR p: Ident;
@@ -663,7 +685,7 @@ BEGIN
 		END
 	ELSIF Sys.Existed(path) THEN
 		NEW(module); module.name := modname;
-		module.path := path; module.lev := 0;
+		module.path := path; module.lev := 0; module.adr := 0;
 		IF modident # NIL THEN
 			modident.obj := module; module.ident := modident
 		END;
@@ -722,7 +744,24 @@ BEGIN
 	Enter(NewSProc(sfVAL, cSFunc), 'VAL');
 	
 	Enter(NewTypeObj(byteType), 'BYTE');
-	systemScope := topScope; CloseScope; curLev := 0
+	systemScope := topScope; CloseScope;
+	
+	LoadLibraryW := NewProc(); LoadLibraryW.type := NewProcType();
+	OpenScope; Enter(NewPar(LoadLibraryW.type, strType, FALSE), '1');
+	LoadLibraryW.type.fields := topScope.first; CloseScope;
+	LoadLibraryW.type.parblksize := 8;
+	LoadLibraryW.type.base := intType;
+	LoadLibraryW.adr := -48;
+	
+	GetProcAddress := NewProc(); GetProcAddress.type := NewProcType();
+	OpenScope; Enter(NewPar(GetProcAddress.type, intType, FALSE), '2');
+	Enter(NewPar(GetProcAddress.type, intType, FALSE), '1');
+	GetProcAddress.type.fields := topScope.first; CloseScope;
+	GetProcAddress.type.parblksize := 16;
+	GetProcAddress.type.base := intType;
+	GetProcAddress.adr := -40;
+	
+	curLev := 0
 END Init;
 
 BEGIN
@@ -737,5 +776,7 @@ BEGIN
 	NewPredefinedType(nilType, tNil);
 	NewPredefinedType(realType, tReal);
 	NewPredefinedType(strType, tStr);
-	NewPredefinedType(noType, tNull)
+	NewPredefinedType(noType, tNull);
+	
+	
 END Base1.
