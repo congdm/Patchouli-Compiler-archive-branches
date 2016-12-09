@@ -56,7 +56,7 @@ CONST
 	
 	spINC* = 130; spDEC* = 131; spINCL* = 132; spEXCL* = 133;
 	spNEW* = 134; spASSERT* = 135; spPACK* = 136; spUNPK* = 137;
-	spGET* = 138; spPUT* = 139; spCOPY* = 140;
+	spGET* = 138; spPUT* = 139; spCOPY* = 140; spINT3* = 141;
 	
 TYPE
 	IdStr* = ARRAY MaxIdLen+1 OF CHAR;

@@ -239,8 +239,8 @@ END NewIdent;
 
 PROCEDURE NewNode(op: INTEGER; x, y: B.Object): B.Node;
 	VAR z: B.Node;
-BEGIN
-	NEW(z); z.class := B.cNode; z.op := op;
+BEGIN NEW(z);
+	z.class := B.cNode; z.op := op; z.srcPos := S.Pos();
 	z.left := x; z.right := y; z.ronly := FALSE;
 	RETURN z
 END NewNode;
@@ -700,6 +700,8 @@ BEGIN Check0(S.lparen);
 			)
 		);
 		x(B.Node).right.type := B.intType
+	ELSIF f.id = S.spINT3 THEN
+		x := NewNode(f.id, NIL, NIL)
 	ELSE Mark('unsupported');
 	END;
 	Check0(S.rparen);
@@ -1099,10 +1101,9 @@ BEGIN
 			GetSym; CheckExport(curProcIdent)
 		ELSE curProcIdent := NIL; Mark('proc name?')
 		END;
-		proc := B.NewProc(); tp := B.NewProcType();
-		G.SetTypeSize(tp); proc.type := tp;
+		proc := B.NewProc(); tp := B.NewProcType(); proc.type := tp;
 		IF sym = S.lparen THEN FormalParameters(tp) END; Check0(S.semicolon);
-		B.OpenScope; B.IncLev(1); par := tp.fields;
+		G.SetTypeSize(tp); B.OpenScope; B.IncLev(1); par := tp.fields;
 		WHILE par # NIL DO
 			ident := NewIdent(par.name); NEW(parobj); ident.obj := parobj;
 			parobj^ := par.obj(B.Par)^; parobj.ident := ident;

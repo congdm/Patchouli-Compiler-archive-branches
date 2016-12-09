@@ -1,7 +1,7 @@
 MODULE AyaCompile1;
 (*$CONSOLE*)
 
-IMPORT
+IMPORT SYSTEM,
 	Sys := BaseSys, Scanner := Scanner1, Parser := Parser1;
 	
 VAR

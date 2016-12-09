@@ -57,7 +57,7 @@ TYPE
 	
 	ObjDesc* = EXTENSIBLE RECORD
 		class*: INTEGER; type*: Type; ident*: Ident;
-		regUsed*, xRegUsed*: SET
+		regUsed*, xRegUsed*: SET (* for Generator usage *)
 	END;
 	Const* = POINTER TO EXTENSIBLE RECORD (ObjDesc) val*: INTEGER END;
 	Field* = POINTER TO EXTENSIBLE RECORD (ObjDesc) off*: INTEGER END;
@@ -90,7 +90,8 @@ TYPE
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
 	
 	NodeDesc* = EXTENSIBLE RECORD (ObjDesc)
-		op*: INTEGER; left*, right*: Object; ronly*: BOOLEAN
+		op*: INTEGER; left*, right*: Object; ronly*: BOOLEAN;
+		srcPos*: INTEGER (* for debugging *)
 	END;
 	
 	TypeDesc* = RECORD
@@ -751,6 +752,7 @@ BEGIN
 	Enter(NewSProc(spCOPY, cSProc), 'COPY');
 	Enter(NewSProc(spLoadLibraryW, cSProc), 'LoadLibraryW');
 	Enter(NewSProc(spGetProcAddress, cSProc), 'GetProcAddress');
+	Enter(NewSProc(S.spINT3, cSProc), 'INT3');
 	
 	Enter(NewSProc(sfADR, cSFunc), 'ADR');
 	Enter(NewSProc(sfSIZE, cSFunc), 'SIZE');
@@ -783,6 +785,7 @@ BEGIN
 	S.InstallSetCompilerFlag(SetCompilerFlag);
 
 	preTypeNo := 0; predefinedTypes[0] := NIL; curLev := -1;
+	(*SYSTEM.INT3();*)
 	NewPredefinedType(intType, tInt);
 	NewPredefinedType(byteType, tInt);
 	NewPredefinedType(boolType, tBool);
