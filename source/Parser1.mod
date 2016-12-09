@@ -167,7 +167,16 @@ PROCEDURE CheckPar(fpar: B.Par; x: B.Object);
 	VAR xtype, ftype: B.Type; xform, fform: INTEGER;
 BEGIN xtype := x.type; ftype := fpar.type;
 	IF ~fpar.varpar THEN
-		IF ~CompTypes(ftype, xtype) THEN Mark('invalid type') END
+		IF ~CompTypes(ftype, xtype) THEN Mark('invalid par type');
+			IF ftype.obj = NIL THEN Sys.Console_WriteStr('no ftype.obj')
+			ELSIF ftype.obj.ident = NIL THEN Sys.Console_WriteStr('no ftype.obj.ident')
+			ELSE Sys.Console_WriteStr(ftype.obj.ident.name); Sys.Console_Write(' ')
+			END;
+			IF xtype.obj = NIL THEN Sys.Console_WriteStr('no xtype.obj')
+			ELSIF xtype.obj.ident = NIL THEN Sys.Console_WriteStr('no xtype.obj.ident')
+			ELSE Sys.Console_WriteStr(xtype.obj.ident.name); Sys.Console_WriteLn
+			END
+		END
 	ELSIF fpar.varpar THEN
 		CheckVar(x, fpar.ronly); xform := xtype.form; fform := ftype.form;
 		IF (xtype = ftype)

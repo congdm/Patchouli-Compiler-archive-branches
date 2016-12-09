@@ -371,7 +371,8 @@ BEGIN
 	IF typ # NIL THEN
 		WriteInt(symfile, typ.lev); WriteInt(symfile, typ.ref);
 		IF typ.lev < -1 THEN Sys.WriteStr(symfile, modList[-typ.lev-2].name)
-		ELSIF typ.lev = 0 THEN IF typ.ref < 0 THEN ExportType0(typ) END
+		ELSIF typ.lev = 0 THEN
+			IF typ.ref < 0 THEN ExportType0(typ) END
 		ELSE ASSERT(typ.lev = -1)
 		END
 	ELSE WriteInt(symfile, -1); WriteInt(symfile, 0)
@@ -539,14 +540,14 @@ BEGIN
 	ELSIF mod = 0 THEN
 		IF ref >= 0 THEN
 			i := -(curLev+2); p := modList[i].types;
-			WHILE ref > 0 DO DEC(ref); p := p.next END;
+			WHILE (p # NIL) & (p.type.ref # ref) DO p := p.next END;
 			typ := p.type
 		ELSE ImportType0(typ)
 		END
 	ELSIF mod < -1 THEN
 		Sys.ReadStr(symfile, modname); module := FindModule(modname);
-		IF module # NIL THEN
-			p := module.types; WHILE ref > 0 DO DEC(ref); p := p.next END;
+		IF module # NIL THEN p := module.types;
+			WHILE (p # NIL) & (p.type.ref # ref) DO p := p.next END;
 			typ := p.type
 		ELSE msg := 'Need to import '; AppendStr(modname, msg);
 			AppendStr(' in order to import ', msg); i := -(curLev+2);
@@ -566,11 +567,11 @@ BEGIN i := -(curLev+2);
 	END
 END AddToTypeList;
 
-PROCEDURE ImportProc(VAR typ: Type; isType: BOOLEAN);
+PROCEDURE ImportProc(VAR typ: Type; ref: INTEGER);
 	VAR par: Ident; x: Par; xtype: Type;
 		cls, n: INTEGER; name: IdStr; varpar: BOOLEAN;
-BEGIN
-	typ := NewProcType(); IF isType THEN AddToTypeList(typ) END;
+BEGIN typ := NewProcType();
+	IF ref > -1 THEN typ.ref := ref; AddToTypeList(typ) END;
 	ReadInt(symfile, typ.size); ReadInt(symfile, typ.align);
 	DetectTypeI(typ.base); ReadInt(symfile, cls); OpenScope;
 	WHILE cls # cType DO
@@ -604,15 +605,16 @@ BEGIN
 		END;
 		typ.fields := topScope.first; CloseScope
 	ELSIF form = tArray THEN
-		ReadInt(symfile, len); typ := NewArray(len); AddToTypeList(typ);
+		ReadInt(symfile, len); typ := NewArray(len); 
+		typ.ref := ref; AddToTypeList(typ);
 		ReadInt(symfile, typ.size); ReadInt(symfile, typ.align);
 		DetectTypeI(typ.base); CompleteArray(typ)
 	ELSIF form = tPtr THEN
-		typ := NewPointer(); AddToTypeList(typ);
+		typ := NewPointer(); typ.ref := ref; AddToTypeList(typ);
 		ReadInt(symfile, typ.size); ReadInt(symfile, typ.align);
 		DetectTypeI(typ.base)
 	ELSIF form = tProc THEN
-		ImportProc(typ, TRUE)
+		ImportProc(typ, ref)
 	END
 END ImportType;
 
@@ -663,7 +665,7 @@ BEGIN
 			ELSIF cls = cProc THEN
 				Sys.ReadStr(symfile, name);
 				x := NewProc(); ReadInt(symfile, x(Proc).expno);
-				x(Proc).adr := 0; ImportProc(x.type, FALSE);
+				x(Proc).adr := 0; ImportProc(x.type, -1);
 				ident := NewImportIdent(ident, name, x)
 			ELSIF cls = cModule THEN
 				Sys.ReadStr(symfile, name); ReadModkey(depkey);
