@@ -61,7 +61,7 @@ CONST
 	ADDPS = 580F00H; MULPS = 590F00H; SUBPS = 5C0F00H; DIVPS = 5E0F00H;
 	ANDPS = 540F00H; ANDNPS = 550F00H; ORPS = 560F00H; XORPS = 570F00H;
 	ANDPD = 540F66H; ANDNPD = 550F66H; ORPD = 560F66H; XORPD = 570F66H;
-	MOVAPS = 280F00H; MOVAPSd = 290F00H; COMISS = 2F0F00H;
+	MOVAPS = 280F00H; MOVAPSd = 290F00H; COMISS = 2F0F00H; COMISD = 2F0F66H;
 	CVTSS2SI = 2D0FF3H; CVTSI2SS = 2A0FF3H;
 	CVTSD2SI = 2D0FF2H; CVTSI2SD = 2A0FF2H;
 	
@@ -991,6 +991,8 @@ BEGIN RefToRegI(x);
 			ELSIF x.mode IN {mRegI, mSP, mIP, mBP, mBX} THEN
 				SetRmOperand(x);
 				IF size >= 4 THEN EmitRegRm(MOVd, r, size)
+				ELSIF x.type = B.strType THEN
+					ASSERT(x.strlen <= 2); EmitMOVZX(r, 2)
 				ELSE EmitMOVZX(r, size)
 				END
 			ELSIF x.mode = mProc THEN
@@ -1217,15 +1219,18 @@ END Not;
 
 PROCEDURE Compare(VAR x: Item; node: B.Node);
 	VAR cond: INTEGER; cx, r: BYTE; oldStat: MakeItemState;
-		y, len: Item; orgBlk, blk2, blk3: Block;
-BEGIN ResetMkItmStat2(oldStat);
-	IF node.left.type.form IN B.typScalar - {B.tReal} THEN
+		y, len: Item; tp: B.Type; orgBlk, blk2, blk3: Block;
+BEGIN ResetMkItmStat2(oldStat); tp := node.left.type;
+	IF tp.form IN B.typScalar - {B.tReal} THEN
 		LoadLeftRight2(x, y, node); EmitRR(CMPd, x.r, 8, y.r);
 		IF x.type.form = B.tInt THEN cond := IntOpToCc(node.op)
 		ELSE cond := OpToCc(node.op)
 		END;
 		FreeReg(x.r); FreeReg(y.r); SetCond(x, cond)
-	ELSIF B.IsStr(node.left.type) THEN
+	ELSIF tp = B.realType THEN
+		LoadLeftRight2(x, y, node); SetRm_reg(y.r); EmitXmmRm(COMISD, x.r, 4);
+		FreeXReg(x.r); FreeXReg(y.r); SetCond(x, OpToCc(node.op))
+	ELSIF B.IsStr(tp) THEN
 		SetBestReg(reg_SI); AvoidUsedBy(node.right); SetAvoid(reg_DI);
 		MakeItem0(x, node.left); LoadAdr(x); ResetMkItmStat;
 		SetBestReg(reg_DI); MakeItem0(y, node.right); LoadAdr(y);
@@ -1244,6 +1249,7 @@ BEGIN ResetMkItmStat2(oldStat);
 		blk3 := curBlk; OpenBlock(ccNZ); blk2.jDst := curBlk;
 		blk3.jDst := blk2; FJump(blk2); BJump(blk3);
 		FreeReg(reg_DI); FreeReg(reg_SI); SetCond(x, cond)
+	ELSE ASSERT(FALSE)
 	END;
 	MkItmStat := oldStat
 END Compare;
@@ -1514,7 +1520,7 @@ BEGIN id := node.op; obj1 := node.left; obj2 := node.right;
 			MakeItem0(x, obj1); Load(x);
 			SetRm_reg(r); EmitXmmRm(SseMOVDd, x.r, 8);
 			FreeXReg(x.r); x.mode := mReg; x.r := r; MkItmStat := oldStat;
-			IF node.type.size < 8 THEN
+			IF node.type.size < 8 THEN Sys.Console_WriteInt(node.type.size);
 				SetRm_reg(x.r); EmitMOVZX(x.r, node.type.size)
 			END
 		ELSIF (obj1.type.form # B.tReal) & (node.type.form # B.tReal) THEN
@@ -1658,10 +1664,6 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	id := node.op; obj1 := node.left; obj2 := node.right;
 	IF id = S.spINC THEN AvoidUsedBy(obj2); MakeItem0(x, obj1);
 		IF obj2 = NIL THEN SetRmOperand(x); EmitRm(INC_, x.type.size)
-		ELSIF obj2 IS B.Const THEN MakeItem0(y, obj2); SetRmOperand(x);
-			IF SmallConst(y.a) THEN EmitRmImm(ADDi, x.type.size, y.a)
-			ELSE Load(y); EmitRegRm(ADD, y.r, x.type.size)
-			END
 		ELSE SetRmOperand(x); r := AllocReg();
 			EmitRegRm(MOVd, r, x.type.size); ResetMkItmStat;
 			MakeItem0(y, obj2); Load(y); EmitRR(ADDd, r, x.type.size, y.r);
@@ -1669,33 +1671,21 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 		END
 	ELSIF id = S.spDEC THEN AvoidUsedBy(obj2); MakeItem0(x, obj1);
 		IF obj2 = NIL THEN SetRmOperand(x); EmitRm(DEC_, x.type.size)
-		ELSIF obj2 IS B.Const THEN MakeItem0(y, obj2); SetRmOperand(x);
-			IF SmallConst(y.a) THEN EmitRmImm(SUBi, x.type.size, y.a)
-			ELSE Load(y); EmitRegRm(SUB, y.r, x.type.size)
-			END
 		ELSE SetRmOperand(x); r := AllocReg();
 			EmitRegRm(MOVd, r, x.type.size); ResetMkItmStat;
 			MakeItem0(y, obj2); Load(y); EmitRR(SUBd, r, x.type.size, y.r);
 			SetRmOperand(x); EmitRegRm(MOV, r, x.type.size)
 		END
-	ELSIF id = S.spINCL THEN AvoidUsedBy(obj2); MakeItem0(x, obj1);
-		IF obj2 IS B.Const THEN
-			MakeItem0(y, obj2); SetRmOperand(x);
-			EmitRmImm(BTSi, x.type.size, y.a)
-		ELSE SetRmOperand(x); r := AllocReg();
-			EmitRegRm(MOVd, r, x.type.size); ResetMkItmStat;
-			MakeItem0(y, obj2); Load(y); EmitRR(BTS, y.r, x.type.size, r);
-			SetRmOperand(x); EmitRegRm(MOV, r, x.type.size)
-		END
-	ELSIF id = S.spINCL THEN AvoidUsedBy(obj2); MakeItem0(x, obj1);
-		IF obj2 IS B.Const THEN
-			MakeItem0(y, obj2); SetRmOperand(x);
-			EmitRmImm(BTRi, x.type.size, y.a)
-		ELSE SetRmOperand(x); r := AllocReg();
-			EmitRegRm(MOVd, r, x.type.size); ResetMkItmStat;
-			MakeItem0(y, obj2); Load(y); EmitRR(BTR, y.r, x.type.size, r);
-			SetRmOperand(x); EmitRegRm(MOV, r, x.type.size)
-		END
+	ELSIF id = S.spINCL THEN
+		AvoidUsedBy(obj2); MakeItem0(x, obj1); SetRmOperand(x);
+		r := AllocReg(); EmitRegRm(MOVd, r, x.type.size); ResetMkItmStat;
+		MakeItem0(y, obj2); Load(y); EmitRR(BTS, y.r, x.type.size, r);
+		SetRmOperand(x); EmitRegRm(MOV, r, x.type.size)
+	ELSIF id = S.spEXCL THEN
+		AvoidUsedBy(obj2); MakeItem0(x, obj1); SetRmOperand(x);
+		r := AllocReg(); EmitRegRm(MOVd, r, x.type.size); ResetMkItmStat;
+		MakeItem0(y, obj2); Load(y); EmitRR(BTR, y.r, x.type.size, r);
+		SetRmOperand(x); EmitRegRm(MOV, r, x.type.size)
 	ELSIF id = S.spNEW THEN
 		SetAlloc(reg_C); SetAlloc(reg_D); SetAlloc(reg_R8); SetAlloc(reg_A);
 		SetRm_regI(reg_B, B.HeapHandle); EmitRegRm(MOVd, reg_C, 8);
@@ -1803,6 +1793,18 @@ BEGIN imm := node.right(B.Const).val;
 		ELSIF node.op = B.sfASR THEN EmitRI(SARi, x.r, 8, imm MOD 64)
 		ELSE EmitRI(RORi, x.r, 8, imm MOD 64)
 		END
+	ELSIF (node.op = S.spINC) OR (node.op = S.spDEC) THEN
+		ResetMkItmStat; allocReg := {}; allocXReg := {};
+		MakeItem0(x, node.left); RefToRegI(x); SetRmOperand(x);
+		IF node.op = S.spINC THEN EmitRmImm(ADDi, x.type.size, imm)
+		ELSE EmitRmImm(SUBi, x.type.size, imm)
+		END
+	ELSIF (node.op = S.spINCL) OR (node.op = S.spEXCL) THEN
+		ResetMkItmStat; allocReg := {}; allocXReg := {};
+		MakeItem0(x, node.left); RefToRegI(x); SetRmOperand(x);
+		IF node.op = S.spINCL THEN EmitRmImm(BTSi, x.type.size, imm MOD 64)
+		ELSE EmitRmImm(BTRi, x.type.size, imm MOD 64)
+		END
 	ELSE ASSERT(FALSE)
 	END
 END OpImm;
@@ -1834,6 +1836,7 @@ BEGIN
 		IF (node.right # NIL) & (node.right IS B.Const) THEN
 			const := node.right(B.Const).val;
 			flag := (node.op >= S.sfLSL) & (node.op <= S.sfROR)
+				OR (node.op = S.spINCL) OR (node.op = S.spEXCL)
 				OR SmallConst(const) & (node.right.type.form # B.tReal)
 					& ((node.right.type # B.setType) OR (node.op = S.minus))
 					& (node.op # S.div) & (node.op # S.mod)
@@ -2423,16 +2426,16 @@ PROCEDURE Write_pointer_offset(offset: INTEGER; type: B.Type);
 	VAR ident: B.Ident; field: B.Field; size, k, ptrcnt, n: INTEGER;
 BEGIN ptrcnt := type.nptr;
 	IF type.form = B.tRec THEN ident := type.fields;
-		IF ident # NIL THEN 
-			REPEAT
-				field := ident.obj(B.Field); k := field.type.nptr;
-				IF k > 0 THEN DEC(ptrcnt, k); n := offset + field.off;
-					IF field.type.form = B.tPtr THEN Sys.Write8(out, n)
-					ELSE Write_pointer_offset(n, field.type)
-					END
-				END;
-				ident := ident.next
-			UNTIL ptrcnt <= 0; ASSERT(ptrcnt = 0)
+		IF (type.base # NIL) & (type.base.nptr # 0) THEN
+			Write_pointer_offset(offset, type.base)
+		END;
+		WHILE ident # NIL DO field := ident.obj(B.Field);
+			IF field.type.nptr > 0 THEN n := offset + field.off;
+				IF field.type.form = B.tPtr THEN Sys.Write8(out, n)
+				ELSE Write_pointer_offset(n, field.type)
+				END
+			END;
+			ident := ident.next
 		END
 	ELSIF type.form = B.tArray THEN type := type.base;
 		IF type.form = B.tPtr THEN n := offset;
