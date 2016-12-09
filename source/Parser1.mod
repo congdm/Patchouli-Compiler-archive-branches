@@ -123,6 +123,11 @@ BEGIN
 	IF x.type.form # B.tInt THEN Mark('not int') END
 END CheckInt;
 
+PROCEDURE CheckInt2(x: B.Object);
+BEGIN
+	IF x.type # B.intType THEN Mark('not INTEGER') END
+END CheckInt2;
+
 PROCEDURE CheckBool(x: B.Object);
 BEGIN
 	IF x.type # B.boolType THEN Mark('not bool') END
@@ -724,11 +729,11 @@ PROCEDURE For(): B.Node;
 BEGIN
 	for := NewNode(S.for, NIL, NIL); GetSym;
 	IF sym = S.ident THEN x := FindIdent(); GetSym ELSE Missing(S.ident) END;
-	IF (x # NIL) THEN CheckInt(x); CheckVar(x, FALSE) END;
+	IF (x # NIL) THEN CheckInt2(x); CheckVar(x, FALSE) END;
 	control := NewNode(S.null, x, NIL); for.left := control;
-	Check0(S.becomes); x := expression(); CheckInt(x);
+	Check0(S.becomes); x := expression(); CheckInt2(x);
 	beg := NewNode(S.null, x, NIL); control.right := beg;
-	Check0(S.to); x := expression(); CheckInt(x);
+	Check0(S.to); x := expression(); CheckInt2(x);
 	end := NewNode(S.null, x, NIL); beg.right := end;
 	IF sym = S.by THEN
 		GetSym; x := ConstExpression(); CheckInt(x);

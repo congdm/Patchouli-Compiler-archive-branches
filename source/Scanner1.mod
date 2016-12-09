@@ -27,7 +27,7 @@ IMPORT
 CONST
 	MaxIdLen* = 63; MaxStrLen* = 255;
 	MaxInt = 9223372036854775807; MinInt = -MaxInt - 1;
-    NKW = 34;  (* Number of keywords *)
+    NKW = 35;  (* Number of keywords *)
     maxExp = 38; stringBufSize = 256;
   
     (* Symbols *)
@@ -404,5 +404,6 @@ BEGIN
 	KWX[8] := k;
 	EnterKW(procedure, 'PROCEDURE');
 	KWX[9] := k;
+	EnterKW(null, 'EXTENSIBLE');
 	KWX[10] := k
 END Scanner1.

@@ -5,3 +5,5 @@ test/*.exe
 test/*.dll
 test/*.sym
 source/.vs/
+bin/.vs/
+bin1/.vs/
