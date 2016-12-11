@@ -122,7 +122,7 @@ VAR
 	strbuf*: ARRAY 100000H OF CHAR; strbufSize*: INTEGER;
 	
 	CplFlag* : RECORD
-		main*, console*: BOOLEAN
+		main*, console*, debug*: BOOLEAN
 	END;
 	
 	ExportType0: PROCEDURE(typ: Type);
@@ -166,11 +166,12 @@ BEGIN i := 0; WHILE dst[i] # 0X DO INC(i) END;
 	dst[i+k] := 0X
 END AppendStr;
 
-PROCEDURE SetCompilerFlag(pragma: ARRAY OF CHAR);
+PROCEDURE SetCompilerFlag*(pragma: ARRAY OF CHAR);
 BEGIN
 	IF pragma = 'MAIN' THEN CplFlag.main := TRUE
 	ELSIF pragma = 'CONSOLE' THEN
 		CplFlag.main := TRUE; CplFlag.console := TRUE
+	ELSIF pragma = 'DEBUG' THEN CplFlag.debug := TRUE
 	END
 END SetCompilerFlag;
 
@@ -293,7 +294,10 @@ PROCEDURE NewRecord*(): Type;
 	VAR tp: Type; p: TypeList;
 BEGIN
 	NewType(tp, tRec); tp.len := 0;
-	NEW(p); p.type := tp; p.next := recList; recList := p;
+	IF curLev >= 0 THEN
+		NEW(p); p.type := tp; p.next := recList; recList := p
+	ELSIF curLev = -1 THEN ASSERT(FALSE)
+	END;
 	RETURN tp
 END NewRecord;
 
@@ -384,7 +388,8 @@ PROCEDURE ExportProc(typ: Type);
 	VAR par: Ident; x: Par;
 BEGIN
 	WriteInt(symfile, typ.size); WriteInt(symfile, typ.align);
-	DetectType(typ.base); par := typ.fields;
+	WriteInt(symfile, typ.parblksize); DetectType(typ.base);
+	par := typ.fields;
 	WHILE par # NIL DO x := par.obj(Par);
 		WriteInt(symfile, x.class);
 		Sys.WriteStr(symfile, par.name);
@@ -417,6 +422,7 @@ BEGIN
 			ELSE Sys.WriteStr(symfile, fld.name)
 			END;
 			DetectType(fld.obj.type);
+			WriteInt(symfile, fld.obj(Field).off);
 			fld := fld.next
 		END;
 		WriteInt (symfile, cType)
@@ -574,7 +580,8 @@ PROCEDURE ImportProc(VAR typ: Type; ref: INTEGER);
 BEGIN typ := NewProcType();
 	IF ref > -1 THEN typ.ref := ref; AddToTypeList(typ) END;
 	ReadInt(symfile, typ.size); ReadInt(symfile, typ.align);
-	DetectTypeI(typ.base); ReadInt(symfile, cls); OpenScope;
+	ReadInt(symfile, typ.parblksize); DetectTypeI(typ.base);
+	ReadInt(symfile, cls); OpenScope;
 	WHILE cls # cType DO
 		Sys.ReadStr(symfile, name);
 		ReadInt(symfile, n); varpar := n = ORD(TRUE);
@@ -601,6 +608,7 @@ BEGIN
 			Sys.ReadStr(symfile, name);
 			DetectTypeI(fltype);
 			x := NewField(typ, fltype);
+			ReadInt(symfile, x(Field).off);
 			fld := NewImportIdent(fld, name, x);
 			ReadInt(symfile, cls)
 		END;

@@ -110,8 +110,7 @@ END Read;
 
 PROCEDURE Identifier(VAR sym: INTEGER);
 	VAR i, k2: INTEGER;
-BEGIN
-	i := 0;
+BEGIN i := 0;
 	REPEAT
 		IF i < MaxIdLen THEN id[i] := ch; INC(i) END; Read
 	UNTIL (ch < '0') OR (ch > '9') & (ch < 'A')
@@ -250,9 +249,9 @@ BEGIN
 				IF k2 <= (max-d[i]) DIV 10 THEN k2 := k2*10 + d[i]
 				ELSE Mark ('Too large'); k2 := 0
 				END
-			ELSE Mark ('Bad integer')
+			ELSE Mark('Bad integer')
 			END;
-			INC (i)
+			INC(i)
 		UNTIL i = n;
 		sym := int; ival := k2
     END

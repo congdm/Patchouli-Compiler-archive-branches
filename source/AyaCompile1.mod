@@ -14,7 +14,7 @@ BEGIN
 	IF str[0] # 0X THEN
 		IF Sys.Existed(str) THEN
 			Sys.Open(srcfile, str); Scanner.Init(srcfile, 0);
-			Sys.Close(srcfile); Scanner.Get(sym); 
+			Sys.Close(srcfile); Scanner.Get(sym);
 			IF sym = Scanner.module THEN Parser.Module
 			ELSE Scanner.Mark('MODULE?')
 			END

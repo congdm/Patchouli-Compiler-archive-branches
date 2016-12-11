@@ -1,6 +1,6 @@
 MODULE Parser1;
 
-IMPORT
+IMPORT SYSTEM,
 	Sys := BaseSys, Crypt,
 	S := Scanner1, B := Base1, G := Generator1;
 	
@@ -167,16 +167,7 @@ PROCEDURE CheckPar(fpar: B.Par; x: B.Object);
 	VAR xtype, ftype: B.Type; xform, fform: INTEGER;
 BEGIN xtype := x.type; ftype := fpar.type;
 	IF ~fpar.varpar THEN
-		IF ~CompTypes(ftype, xtype) THEN Mark('invalid par type');
-			IF ftype.obj = NIL THEN Sys.Console_WriteStr('no ftype.obj')
-			ELSIF ftype.obj.ident = NIL THEN Sys.Console_WriteStr('no ftype.obj.ident')
-			ELSE Sys.Console_WriteStr(ftype.obj.ident.name); Sys.Console_Write(' ')
-			END;
-			IF xtype.obj = NIL THEN Sys.Console_WriteStr('no xtype.obj')
-			ELSIF xtype.obj.ident = NIL THEN Sys.Console_WriteStr('no xtype.obj.ident')
-			ELSE Sys.Console_WriteStr(xtype.obj.ident.name); Sys.Console_WriteLn
-			END
-		END
+		IF ~CompTypes(ftype, xtype) THEN Mark('invalid par type') END
 	ELSIF fpar.varpar THEN
 		CheckVar(x, fpar.ronly); xform := xtype.form; fform := ftype.form;
 		IF (xtype = ftype)
@@ -279,8 +270,12 @@ BEGIN x := FindIdent(); GetSym;
 			IF ident # NIL THEN x := ident.obj;
 				IF (x IS B.Var) & (x(B.Var).lev < -1) & (x(B.Var).adr = 0)
 				OR (x IS B.Proc) & (x(B.Proc).lev < -1) & (x(B.Proc).adr = 0)
-				OR (x.class = B.cType) & (x.type.lev < -1) & (x.type.adr = 0)
 				THEN G.AllocImport(x, mod)
+				ELSIF (x.class = B.cType) & (x.type.lev < -1) THEN
+					IF (x.type.form = B.tRec) & (x.type.adr = 0)
+					OR (x.type.form = B.tPtr) & (x.type.base.adr = 0) THEN
+						G.AllocImport(x, mod)
+					END
 				END
 			ELSE Mark('not found'); x := NIL
 			END; GetSym
@@ -651,10 +646,11 @@ BEGIN Check0(S.lparen);
 		y := expression(); CheckInt(y); x := NewNode(f.id, x, y)
 	ELSIF f.id = B.spNEW THEN
 		x := designator(); Check1(x, {B.tPtr}); CheckVar(x, FALSE);
-		IF (x.type.lev < -1) & (x.type.base.adr = 0) THEN
+		IF (x.type.base.lev < -1) & (x.type.base.adr = 0) THEN
 			t := x.type.base.obj;
+			IF t = NIL THEN t := x.type.obj END;
 			IF t = NIL THEN t := B.NewTypeObj(x.type.base) END;
-			G.AllocImport(t, B.ModByLev(x.type.lev))
+			G.AllocImport(t, B.ModByLev(x.type.base.lev))
 		END;
 		x := NewNode(S.spNEW, x, NIL)
 	ELSIF f.id = B.spASSERT THEN

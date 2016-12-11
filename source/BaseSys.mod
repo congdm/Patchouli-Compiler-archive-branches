@@ -101,6 +101,7 @@ BEGIN
 END ImportProc;
 
 PROCEDURE AsDword(x: INTEGER): INTEGER;
+BEGIN
 	RETURN x MOD 100000000H
 END AsDword;
 
@@ -456,6 +457,7 @@ BEGIN
 END MergeMemFile;
 
 PROCEDURE MemFileLength*(f: MemFile): INTEGER;
+BEGIN
 	RETURN f.len
 END MemFileLength;
 
