@@ -55,31 +55,31 @@ TYPE
 		type*: Type; a*: INTEGER; next*: TypeList
 	END;
 	
-	ObjDesc* = EXTENSIBLE RECORD
+	ObjDesc* = RECORD
 		class*: INTEGER; type*: Type; ident*: Ident;
 		regUsed*, xRegUsed*: SET (* for Generator usage *)
 	END;
-	Const* = POINTER TO EXTENSIBLE RECORD (ObjDesc) val*: INTEGER END;
-	Field* = POINTER TO EXTENSIBLE RECORD (ObjDesc) off*: INTEGER END;
-	Var* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
+	Const* = POINTER TO RECORD (ObjDesc) val*: INTEGER END;
+	Field* = POINTER TO RECORD (ObjDesc) off*: INTEGER END;
+	Var* = POINTER TO RECORD (ObjDesc)
 		adr*, expno*, lev*: INTEGER; ronly*: BOOLEAN
 	END;
-	Par* = POINTER TO EXTENSIBLE RECORD (Var)
+	Par* = POINTER TO RECORD (Var)
 		varpar*: BOOLEAN
 	END;
-	Proc* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
+	Proc* = POINTER TO RECORD (ObjDesc)
 		adr*, expno*, lev*, locblksize*: INTEGER;
         decl*: Ident; statseq*: Node; return*: Object
 	END;
-	Str* = POINTER TO EXTENSIBLE RECORD (Var)
+	Str* = POINTER TO RECORD (Var)
 		bufpos*, len*: INTEGER
 	END;
-	Module* = POINTER TO EXTENSIBLE RECORD (ObjDesc)
+	Module* = POINTER TO RECORD (ObjDesc)
 		path*: String; name*: IdStr; 
 		key*: ModuleKey; lev*, adr*: INTEGER;
 		first*, impList*: Ident; types*: TypeList
 	END;
-	SProc* = POINTER TO EXTENSIBLE RECORD (ObjDesc) id*: INTEGER END;
+	SProc* = POINTER TO RECORD (ObjDesc) id*: INTEGER END;
 	
 	IdentDesc* = RECORD
 		export*: BOOLEAN;
@@ -89,7 +89,7 @@ TYPE
 	
 	Scope* = POINTER TO RECORD first*: Ident; dsc*: Scope END;
 	
-	NodeDesc* = EXTENSIBLE RECORD (ObjDesc)
+	NodeDesc* = RECORD (ObjDesc)
 		op*: INTEGER; left*, right*: Object; ronly*: BOOLEAN;
 		srcPos*: INTEGER (* for debugging *)
 	END;
