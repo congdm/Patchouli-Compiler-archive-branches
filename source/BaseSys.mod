@@ -392,6 +392,21 @@ BEGIN
 	Console_WriteStr(str)
 END Console_WriteInt;
 
+PROCEDURE Console_WriteHex*(x: INTEGER);
+	VAR i, y: INTEGER;
+BEGIN
+	IF x # 0 THEN i := 15;
+		WHILE ASR(x, i*4) MOD 16 = 0 DO DEC(i) END;
+		WHILE i >= 0 DO
+			y := ASR(x, i*4) MOD 16;
+			IF y < 10 THEN Console_Write(CHR(y+ORD('0')))
+			ELSE Console_Write(CHR(ORD('A')-10+y))
+			END; DEC(i)
+		END
+	ELSE Console_Write('0')
+	END
+END Console_WriteHex;
+
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 

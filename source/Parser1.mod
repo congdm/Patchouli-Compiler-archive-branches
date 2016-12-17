@@ -166,19 +166,22 @@ END CheckVar;
 PROCEDURE CheckPar(fpar: B.Par; x: B.Object);
 	VAR xtype, ftype: B.Type; xform, fform: INTEGER;
 BEGIN xtype := x.type; ftype := fpar.type;
-	IF ~fpar.varpar THEN
+	IF IsOpenArray(ftype) THEN
+		CheckVar(x, fpar.ronly); xform := xtype.form; fform := ftype.form;
+		IF (xform = B.tArray) & (ftype.base = xtype.base)
+		OR (ftype.base = B.byteType) OR IsStr(xtype) & IsStr(ftype)
+		THEN (*valid*) ELSE Mark('invalid par type')
+		END
+	ELSIF ~fpar.varpar THEN
 		IF ~CompTypes(ftype, xtype) THEN Mark('invalid par type') END
 	ELSIF fpar.varpar THEN
 		CheckVar(x, fpar.ronly); xform := xtype.form; fform := ftype.form;
 		IF (xtype = ftype)
 		OR (fform = B.tRec) & (xform = B.tRec) & IsExt(xtype, ftype)
-		OR IsOpenArray(ftype) & (xform = B.tArray)
-			& (ftype.base = xtype.base)
 		OR (fform = B.tArray) & (xform = B.tArray)
 			& (ftype.base = xtype.base) & (ftype.len = xtype.len)
-		OR IsOpenArray(ftype) & (ftype.base = B.byteType)
 		OR IsStr(xtype) & IsStr(ftype)
-		THEN (*valid*) ELSE Mark('invalid type')
+		THEN (*valid*) ELSE Mark('invalid par type')
 		END
 	END
 END CheckPar;
@@ -546,7 +549,7 @@ BEGIN x := factor();
 		Check1(x, {B.tReal, B.tSet}); GetSym; y := factor();
 		IF ~CompTypes(x.type, y.type) THEN Mark('invalid type') END;
 		IF IsConst(x) & IsConst(y) THEN x := G.FoldConst(S.rdiv, x, y)
-		ELSE xtype := x.type; x := NewNode(S.times, x, y); x.type := xtype
+		ELSE xtype := x.type; x := NewNode(S.rdiv, x, y); x.type := xtype
 		END
 	ELSIF (sym = S.div) OR (sym = S.mod) DO
 		CheckInt(x); op := sym; GetSym; y := factor(); CheckInt(y);

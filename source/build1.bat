@@ -1,5 +1,5 @@
-..\bin\AyaCompile Crypt.mod
 ..\bin\AyaCompile BaseSys.mod
+..\bin\AyaCompile Crypt.mod
 ..\bin\AyaCompile Scanner1.mod
 ..\bin\AyaCompile Base1.mod
 ..\bin\AyaCompile Generator1.mod
@@ -14,11 +14,4 @@ move /Y Scanner1.dll ..\bin1\
 move /Y Generator1.dll ..\bin1\
 move /Y Parser1.dll ..\bin1\
 move /Y AyaCompile1.exe ..\bin1\
-move /Y BaseSys.sym ..\bin1\
-move /Y Crypt.sym ..\bin1\
-move /Y Base1.sym ..\bin1\
-move /Y Scanner1.sym ..\bin1\
-move /Y Generator1.sym ..\bin1\
-move /Y Parser1.sym ..\bin1\
-move /Y AyaCompile1.sym ..\bin1\
 echo on

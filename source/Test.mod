@@ -1,22 +1,33 @@
 MODULE Test;
-(*$MAIN*)
-IMPORT SYSTEM;
+(*$CONSOLE*)
 
-TYPE
-	Str = ARRAY 256 OF CHAR;
-
+IMPORT
+	SYSTEM, Sys := BaseSys, Crypt;
+	
 VAR
-	user32, i: INTEGER;
-	ansiStr: ARRAY 256 OF BYTE; str1, str2, str: Str;
-	MessageBoxW: PROCEDURE(hWnd: INTEGER; lpText, lpCaption: Str; uType: INTEGER);
+	hash: Crypt.MD5Hash;
+	data: ARRAY 256 OF BYTE;
+	low, high, i: INTEGER;
+	
+PROCEDURE SetStr(VAR dst: ARRAY OF BYTE; src: ARRAY OF CHAR): INTEGER;
+	VAR i: INTEGER;
+BEGIN
+	FOR i := 0 TO LEN(src)-1 DO dst[i] := ORD(src[i]) END;
+	RETURN i
+END SetStr;
 
 BEGIN
-	IF str1 = str2 THEN
-		i := 1
+	Crypt.InitMD5Hash(hash);
+	i := SetStr(data, '12345678901234567890123456789012345678901234567890123456789012345678901234567890');
+	Crypt.MD5Compute(hash, data, i-1);
+	low := Crypt.MD5GetLowResult(hash);
+	high := Crypt.MD5GetHighResult(hash);
+	FOR i := 0 TO 7 DO
+		Sys.Console_WriteHex(low MOD 256);
+		Sys.Console_Write(' '); low := ASR(low, 8)
 	END;
-	str := 'MessageBoxW'; i := 0;
-	WHILE str[i] # 0X DO ansiStr[i] := ORD(str[i]); INC(i) END;
-	SYSTEM.LoadLibraryW(user32, 'User32.dll');
-	SYSTEM.GetProcAddress(MessageBoxW, user32, SYSTEM.ADR(ansiStr));
-	MessageBoxW(0, 'Hello, world!', 'Test', 0)
+	FOR i := 0 TO 7 DO
+		Sys.Console_WriteHex(high MOD 256);
+		Sys.Console_Write(' '); high := ASR(high, 8)
+	END;
 END Test.

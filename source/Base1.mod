@@ -793,7 +793,6 @@ BEGIN
 	S.InstallSetCompilerFlag(SetCompilerFlag);
 
 	preTypeNo := 0; predefinedTypes[0] := NIL; curLev := -1;
-	(*SYSTEM.INT3();*)
 	NewPredefinedType(intType, tInt);
 	NewPredefinedType(byteType, tInt);
 	NewPredefinedType(boolType, tBool);
