@@ -1,7 +1,7 @@
-..\bin3\AyaCompile1 BaseSys.mod
-..\bin3\AyaCompile1 Crypt.mod
-..\bin3\AyaCompile1 Scanner1.mod
-..\bin3\AyaCompile1 Base1.mod
-..\bin3\AyaCompile1 Generator1.mod
-..\bin3\AyaCompile1 Parser1.mod
-..\bin3\AyaCompile1 AyaCompile1.mod
+..\bin\AyaCompile BaseSys.mod
+..\bin\AyaCompile Crypt.mod
+..\bin\AyaCompile Scanner.mod
+..\bin\AyaCompile Base.mod
+..\bin\AyaCompile Generator.mod
+..\bin\AyaCompile Parser.mod
+..\bin\AyaCompile AyaCompile.mod
