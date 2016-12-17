@@ -18,6 +18,10 @@ VAR
 (* -------------------------------------------------------------------------- *)
 (* MD5 *)
 
+PROCEDURE WriteHex(x: INTEGER);
+BEGIN (*Sys.Console_WriteHex(x); Sys.Console_Write(' ')*)
+END WriteHex;
+
 PROCEDURE InitMD5Hash*(VAR hash: MD5Hash);
 BEGIN
 	hash.a0 := 67452301H; hash.b0 := 0EFCDAB89H;
@@ -46,7 +50,7 @@ BEGIN
 			F := ORD(D * B + ((-D) * C));
 			g := (5 * i + 1) MOD 16
 		ELSIF (i >= 32) & (i <= 47) THEN
-			F := ORD(B / C / D);
+			F := ORD(B / C / D) MOD 100000000H;
 			g := (3 * i + 5) MOD 16
 		ELSIF (i >= 48) & (i <= 63) THEN
 			F := ORD(C / (B + (-D)));

@@ -1,6 +1,6 @@
 MODULE Parser;
 
-IMPORT
+IMPORT SYSTEM,
 	Strings, Console, Base, Scanner, SymTable, Generator;
 	
 CONST
@@ -181,8 +181,8 @@ END CompAddress;
 
 PROCEDURE SameTypes (tpX, tpY: Base.Type) : BOOLEAN;
 	RETURN (tpX = tpY)
-	OR ({tpX.form, tpY.form} = {Base.tArray}) & (tpX.len = 0) & (tpY.len = 0)
-		& SameTypes (tpX.base, tpY.base)
+	OR (tpX.form = Base.tArray) & (tpY.form = Base.tArray)
+		& (tpX.len = 0) & (tpY.len = 0) & SameTypes (tpX.base, tpY.base)
 END SameTypes;
 
 PROCEDURE SameParams (parX, parY: Base.Object) : BOOLEAN;

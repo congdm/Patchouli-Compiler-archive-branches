@@ -1180,11 +1180,13 @@ BEGIN
 		
 		dst := RegHead(-2);
 		
-		IF (reg_A IN curRegs) & (x.r # reg_A) THEN
+		IF y.r = reg_A THEN saveA := FALSE;
+			EmitRR(XCHG, reg_A, 8, x.r); y.r := x.r; x.r := reg_A
+		ELSIF (reg_A IN curRegs) & (x.r # reg_A) & (y.r # reg_A) THEN
 			Alloc_reg (r); EmitRR (MOVd, r, 8, reg_A); saveA := TRUE
 		ELSE saveA := FALSE
 		END;
-		IF (reg_D IN curRegs) & (x.r # reg_D) THEN
+		IF (reg_D IN curRegs) & (x.r # reg_D) & (y.r # reg_A) THEN
 			Alloc_reg(r2); EmitRR (MOVd, r2, 8, reg_D); saveD := TRUE
 		ELSE saveD := FALSE
 		END;
@@ -2309,22 +2311,14 @@ BEGIN
 	obj := SymTable.universe.next;
 	WHILE obj # Base.guard DO
 		IF (obj.class = Base.cType) & (obj.val # 0) THEN tp := obj.type;
-			IF tp.form = Base.tPointer THEN tp := tp.base END;
-			IF tp.len = 1 THEN
-				SetRmOperand_staticvar (obj.val); EmitRegRm (LEA, reg_C, 8);
-				SetRmOperand_staticvar (obj.val + 8); EmitRegRm (MOV, reg_C, 8)
-			ELSIF tp.len > 1 THEN
-				SetRmOperand_staticvar (obj.val + 8);
-				EmitRegRm (LEA, reg_DI, 8); obj2 := tp.base.obj;
-				IF obj2.lev # -2 THEN SetRmOperand_staticvar (obj2.val + 8);
-					EmitRegRm (LEA, reg_SI, 8)
-				ELSE SetRmOperand_staticvar (obj2.val);
-					EmitRegRm (MOVd, reg_SI, 8); EmitRI (ADDi, reg_SI, 8, 8)
+			ASSERT(tp.form # Base.tPointer);
+			WHILE tp.len >= 1 DO obj2 := tp.obj;
+				SetRmOperand_staticvar (obj2.val);
+				IF obj2.lev # -2 THEN EmitRegRm (LEA, reg_C, 8)
+				ELSE EmitRegRm (MOVd, reg_C, 8)
 				END;
-				MoveRI (reg_C, 4, tp.len - 1); EmitRep (MOVSrep, 8, 1);
-				SetRmOperand_regI (reg_DI, tp.len * (-8));
-				EmitRegRm (LEA, reg_C, 8); SetRmOperand_regI (reg_DI, 0);
-				EmitRegRm (MOV, reg_C, 8)
+				SetRmOperand_staticvar (obj.val + tp.len*8);
+				EmitRegRm (MOV, reg_C, 8); tp := tp.base
 			END
 		END;
 		obj := obj.next
