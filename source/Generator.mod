@@ -111,7 +111,8 @@ VAR
 
 	curBlk: Block; debugData: Sys.MemFile;
 	pc, sPos: INTEGER; modid: B.IdStr;
-	procList, curProc, modInitProc, trapProc: Proc;
+	procList, curProc: Proc;
+	modInitProc, trapProc, dllInitProc: Proc;
 
 	mem: RECORD
 		mod, rm, bas, idx, scl, disp: INTEGER
@@ -753,7 +754,10 @@ BEGIN
 	curProc.obj := obj; NewBlock(curProc.blk); modInitProc := curProc;
 	
 	NEW(curProc.next); curProc := curProc.next;
-	NewBlock(curProc.blk); trapProc := curProc
+	NewBlock(curProc.blk); trapProc := curProc;
+	
+	NEW(curProc.next); curProc := curProc.next;
+	NewBlock(curProc.blk); dllInitProc := curProc
 END Pass1;
 
 (* -------------------------------------------------------------------------- *)
@@ -866,7 +870,7 @@ BEGIN
 		blk1 := curBlk; OpenBlock(negated(cond));
 		MoveRI(0, 1, trapno); MoveRI(1, 4, sPos);
 		blk2 := curBlk; OpenBlock(ccAlways);
-		blk2.jDst := trapProc.blk; SYSTEM.INT3(); blk2.call := TRUE;
+		blk2.jDst := trapProc.blk; blk2.call := TRUE;
 		blk1.jDst := curBlk; FJump(blk1)
 	ELSIF cond = ccAlways THEN
 		MoveRI(0, 1, trapno); MoveRI(1, 4, sPos);
@@ -1277,7 +1281,7 @@ BEGIN ResetMkItmStat2(oldStat); tp := node.left.type;
 		IF x.r # reg_SI THEN RelocReg(x.r, reg_SI) END;
 		
 		cx := AllocReg2({}); EmitRR(XOR, cx, 4, cx);
-		OpenBlock(255); blk1 := curBlk; EmitRI(ADDi, cx, 8, 1);
+		OpenBlock(255); EmitRI(ADDi, cx, 8, 1);
 		
 		ArrayLen(len, node.left);
 		IF len.mode = mImm THEN
@@ -1297,8 +1301,10 @@ BEGIN ResetMkItmStat2(oldStat); tp := node.left.type;
 		END;
 		Trap(ccA, stringTrap);
 		
-		EmitBare(CMPSW); OpenBlock(ccNZ); blk2 := curBlk;
-		SetRm_regI(reg_SI, -2); EmitRmImm(CMPi, 2, 0); OpenBlock(ccNZ);
+		EmitBare(CMPSW);
+		blk1 := curBlk; OpenBlock(ccNZ);
+		SetRm_regI(reg_SI, -2); EmitRmImm(CMPi, 2, 0);
+		blk2 := curBlk; OpenBlock(ccNZ);
 		blk1.jDst := curBlk; blk2.jDst := blk1; FJump(blk1); BJump(blk2);
 		FreeReg(reg_DI); FreeReg(reg_SI); SetCond(x, OpToCc(node.op))
 	ELSE ASSERT(FALSE)
@@ -2199,44 +2205,15 @@ BEGIN
 	INC(pc, procCodeSize)
 END TrapHandler;
 
-PROCEDURE MergeAllProcedure;
-	VAR proc: Proc; blk, src, dst: Block; off, n: INTEGER;
-BEGIN proc := procList;
-	WHILE proc # NIL DO blk := proc.blk; blk.proc := proc;
-		WHILE blk.next # NIL DO
-			blk.next.proc := proc; blk.next.no := blk.no+1; blk := blk.next
-		END;
-		IF proc.next # NIL THEN
-			blk.next := proc.next.blk; blk.next.no := blk.no+1
-		END;
-		proc := proc.next
-	END;
-	src := procList.blk;
-	WHILE src # NIL DO
-		IF ~src.finished THEN dst := src.jDst; off := 0;
-			IF ~src.call THEN ASSERT(src.load) END;
-			IF src.no < dst.no THEN blk := src.next;
-				WHILE blk # dst DO INC(off, CodeLen1(blk)); blk := blk.next END
-			ELSE DEC(off, CodeLen1(src)); blk := dst;
-				WHILE blk # src DO DEC(off, CodeLen1(blk)); blk := blk.next END
-			END;
-			IF off # 0 THEN curBlk := src;
-				IF src.call THEN CallNear(off)
-				ELSE SetRm_RIP(off); EmitRegRm(LEA, src.jc, 8)
-				END
-			END;
-			src.finished := TRUE
-		END;
-		src := src.next
-	END;
-	MergeFrom(procList.blk)
-END MergeAllProcedure;
-
 PROCEDURE DLLInit;
 	VAR i, adr, expno: INTEGER; blk: Block;
 		imod: B.Module; key: B.ModuleKey; ident: B.Ident; x: B.Object;
 		t: B.TypeList; tp: B.Type; 
 BEGIN
+	dllInitProc.homeSpace := 0; dllInitProc.stack := 0;
+	dllInitProc.usedReg := {}; dllInitProc.usedXReg := {};
+	curBlk := dllInitProc.blk;
+
 	IF B.CplFlag.debug THEN EmitBare(INT3) END;
 	IF ~B.CplFlag.main THEN
 		EmitRI(CMPi, reg_D, 4, 1); blk := curBlk; OpenBlock(ccZ);
@@ -2302,7 +2279,8 @@ BEGIN
 	END;
 	
 	(* Call module main procedure *)
-	CallNear(Linker.entry - CodeLen() - 5); Linker.entry := pc;
+	blk := curBlk; OpenBlock(ccAlways); blk.call := TRUE;
+	blk.jDst := modInitProc.blk; Linker.entry := pc;
 	
 	(* Exit *)
 	IF B.CplFlag.main THEN EmitRR(XOR, reg_C, 4, reg_C);
@@ -2312,6 +2290,39 @@ BEGIN
 		PopR(reg_B); PopR(reg_DI); PopR(reg_SI); EmitBare(RET)
 	END
 END DLLInit;
+
+PROCEDURE MergeAllProcedure;
+	VAR proc: Proc; blk, src, dst: Block; off, n: INTEGER;
+BEGIN proc := procList;
+	WHILE proc # NIL DO blk := proc.blk; blk.proc := proc;
+		WHILE blk.next # NIL DO
+			blk.next.proc := proc; blk.next.no := blk.no+1; blk := blk.next
+		END;
+		IF proc.next # NIL THEN
+			blk.next := proc.next.blk; blk.next.no := blk.no+1
+		END;
+		proc := proc.next
+	END;
+	src := procList.blk;
+	WHILE src # NIL DO
+		IF ~src.finished THEN dst := src.jDst; off := 0;
+			IF ~src.call THEN ASSERT(src.load) END;
+			IF src.no < dst.no THEN blk := src.next;
+				WHILE blk # dst DO INC(off, CodeLen1(blk)); blk := blk.next END
+			ELSE DEC(off, CodeLen1(src)); blk := dst;
+				WHILE blk # src DO DEC(off, CodeLen1(blk)); blk := blk.next END
+			END;
+			IF off # 0 THEN curBlk := src;
+				IF src.call THEN CallNear(off)
+				ELSE SetRm_RIP(off); EmitRegRm(LEA, src.jc, 8)
+				END
+			END;
+			src.finished := TRUE
+		END;
+		src := src.next
+	END;
+	MergeFrom(procList.blk)
+END MergeAllProcedure;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -2833,14 +2844,13 @@ BEGIN
 	(* Pass 2 *)
 	curProc := procList;
 	WHILE curProc # NIL DO
-		IF curProc # trapProc THEN
-			IF curProc = modInitProc THEN Linker.entry := pc END;
-			Procedure
-		ELSE TrapHandler
+		IF (curProc # trapProc) & (curProc # dllInitProc) THEN
+			IF curProc = modInitProc THEN Linker.entry := pc END; Procedure
+		ELSIF curProc = trapProc THEN TrapHandler ELSE DLLInit
 		END;
 		curProc := curProc.next
 	END;
-	MergeAllProcedure; DLLInit;
+	MergeAllProcedure;
 	
 	(* Linker *)
 	Sys.Seek(out, 400H - 16); modkey := B.modkey;
