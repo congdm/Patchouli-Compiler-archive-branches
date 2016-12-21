@@ -2222,7 +2222,7 @@ BEGIN
 	END;
 	
 	PushR(reg_SI); PushR(reg_DI); PushR(reg_B); EmitRI(SUBi, reg_SP, 8, 32);
-	SetRm_RIP(-CodeLen()-7); EmitRegRm(LEA, reg_B, 8);
+	SetRm_RIP(-pc-CodeLen()-7); EmitRegRm(LEA, reg_B, 8);
 	SetRm_regI(reg_B, B.GetProcessHeap); EmitRm(CALL, 4);
 	SetRm_regI(reg_B, B.HeapHandle); EmitRegRm(MOV, reg_A, 8);
 	
