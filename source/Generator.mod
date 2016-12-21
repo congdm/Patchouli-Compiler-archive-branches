@@ -537,7 +537,7 @@ BEGIN
 		ELSIF (tp.form = B.tArray) & (tp.len >= 0) THEN
 			SetTypeSize(tp.base); tp.align := tp.base.align;
 			IF (tp.len # 0) & (MaxSize DIV tp.len < tp.base.size) THEN
-				S.Mark('Size of type is too large'); tp.size := tp.align
+				S.Mark('Size of type is too large'); tp.size := 0
 			ELSE tp.size := tp.base.size * tp.len
 			END
 		ELSIF tp.form = B.tRec THEN
@@ -552,9 +552,13 @@ BEGIN
 				size := (size + fAlign - 1) DIV fAlign * fAlign;
 				ident.obj(B.Field).off := size; INC(size, ftype.size);
 				IF size > MaxSize THEN
-					S.Mark('Size of type is too large'); size := align
+					S.Mark('Size of type is too large'); size := 0
 				END;
 				ident := ident.next
+			END;
+			size := (size + align - 1) DIV align * align;
+			IF size > MaxSize THEN
+				S.Mark('Size of type is too large'); size := 0
 			END;
 			tp.size := size; tp.align := align
 		ELSE ASSERT(FALSE)
@@ -862,8 +866,8 @@ BEGIN
 		blk1 := curBlk; OpenBlock(negated(cond));
 		MoveRI(0, 1, trapno); MoveRI(1, 4, sPos);
 		blk2 := curBlk; OpenBlock(ccAlways);
-		blk1.jDst := curBlk; FJump(blk1);
-		blk2.jDst := trapProc.blk; blk2.call := TRUE
+		blk2.jDst := trapProc.blk; SYSTEM.INT3(); blk2.call := TRUE;
+		blk1.jDst := curBlk; FJump(blk1)
 	ELSIF cond = ccAlways THEN
 		MoveRI(0, 1, trapno); MoveRI(1, 4, sPos);
 		blk2 := curBlk; OpenBlock(ccAlways);
@@ -2155,7 +2159,7 @@ BEGIN
 END Procedure;
 
 PROCEDURE TrapHandler;
-	VAR blk1: Block;
+	VAR procCodeSize: INTEGER;
 BEGIN
 	trapProc.homeSpace := 0; trapProc.stack := 0;
 	trapProc.usedReg := {}; trapProc.usedXReg := {};
@@ -2187,7 +2191,12 @@ BEGIN
 	SetRm_reg(reg_A); EmitRm(CALL, 4);
 	
 	EmitRR(XOR, reg_C, 4, reg_C);
-	SetRm_regI(reg_B, B.ExitProcess); EmitRm(CALL, 4)
+	SetRm_regI(reg_B, B.ExitProcess); EmitRm(CALL, 4);
+	
+	ASSERT(trapProc.blk.finished); ASSERT(trapProc.blk.next = NIL);
+	procCodeSize := CodeLen1(trapProc.blk);
+	WHILE procCodeSize MOD 16 # 0 DO INC(procCodeSize); Put1(90H) END;
+	INC(pc, procCodeSize)
 END TrapHandler;
 
 PROCEDURE MergeAllProcedure;
