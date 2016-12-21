@@ -41,6 +41,8 @@ CONST
 	HeapAlloc* = -24;
 	HeapFree* = -16;
 	
+	TrapTable* = -72;
+	
 TYPE
 	IdStr* = S.IdStr;
 	String* = S.Str;

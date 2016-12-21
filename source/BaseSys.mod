@@ -489,10 +489,20 @@ BEGIN
 	IF r.pos <= r.f.len THEN
 		IF r.pos+1 > r.f.maxlen THEN ExtendMemFile(r.f, memFileBlk) END;
 		SYSTEM.PUT(r.f.ptr + r.pos, x); INC(r.pos);
-		IF r.pos > r.f.len THEN INC(r.f.len) END
+		IF r.pos > r.f.len THEN r.f.len := r.pos END
 	ELSE r.eof := TRUE
 	END
 END WriteMemFile;
+
+PROCEDURE WriteMemFile8*(VAR r: MemFileRider; x: INTEGER);
+BEGIN
+	IF r.pos <= r.f.len THEN
+		IF r.pos+8 > r.f.maxlen THEN ExtendMemFile(r.f, memFileBlk) END;
+		SYSTEM.PUT(r.f.ptr + r.pos, x); INC(r.pos, 8);
+		IF r.pos > r.f.len THEN r.f.len := r.pos END
+	ELSE r.eof := TRUE
+	END
+END WriteMemFile8;
 
 PROCEDURE ReadMemFile*(VAR r: MemFileRider; VAR x: BYTE);
 BEGIN

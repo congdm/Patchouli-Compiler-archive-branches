@@ -109,8 +109,9 @@ VAR
 	(* forward decl *)
 	MakeItem0: PROCEDURE(VAR x: Item; obj: B.Object);
 
-	curBlk: Block; pc, sPos: INTEGER;
-	procList, curProc: Proc; modid: B.IdStr;
+	curBlk: Block; debugData: Sys.MemFile;
+	pc, sPos: INTEGER; modid: B.IdStr;
+	procList, curProc, modInitProc, trapProc: Proc;
 
 	mem: RECORD
 		mod, rm, bas, idx, scl, disp: INTEGER
@@ -123,8 +124,8 @@ VAR
 	(* Linker state *)
 	Linker: RECORD
 		imagebase, entry : INTEGER;
-		code_rawsize, data_rawsize, edata_rawsize: INTEGER;
-		code_size, data_size, edata_size: INTEGER;
+		code_rawsize, data_rawsize, edata_rawsize, debug_rawsize: INTEGER;
+		code_size, data_size, edata_size, debug_size: INTEGER;
 		code_rva, data_rva, idata_rva, reloc_rva, edata_rva: INTEGER;
 		code_fadr, data_fadr, idata_fadr, reloc_fadr, edata_fadr: INTEGER;
 		bss_size, bss_rva, startTime, endTime: INTEGER;
@@ -620,12 +621,12 @@ BEGIN p := B.strList;
 	END
 END AllocStaticData;
 
-PROCEDURE Pass1(obj: B.Object);
+PROCEDURE ScanNode(obj: B.Object);
 	VAR node, par1, par2: B.Node; fpar: B.Ident; e: INTEGER;
 	
-	PROCEDURE ParNode(par: B.Node; fpar: B.Ident; n: INTEGER);
+	PROCEDURE ScanPar(par: B.Node; fpar: B.Ident; n: INTEGER);
 		VAR i: INTEGER; varpar, openArr: BOOLEAN; ftype: B.Type;
-	BEGIN Pass1(par.left);
+	BEGIN ScanNode(par.left);
 		par.regUsed := par.left.regUsed; par.xRegUsed := par.left.xRegUsed;
 		ftype := fpar.obj.type; openArr := B.IsOpenArray(ftype);
 		varpar := fpar.obj(B.Par).varpar; 
@@ -644,21 +645,21 @@ PROCEDURE Pass1(obj: B.Object);
 			DEC(i); INC(n)
 		END;
 		IF par.right # NIL THEN
-			ParNode(par.right(B.Node), fpar.next, n);
+			ScanPar(par.right(B.Node), fpar.next, n);
 			par.regUsed := par.regUsed + par.right.regUsed;
 			par.xRegUsed := par.xRegUsed + par.right.xRegUsed
 		END
-	END ParNode;
+	END ScanPar;
 	
-BEGIN (* Pass1 *)
+BEGIN (* ScanNode *)
 	obj.regUsed := {}; obj.xRegUsed := {};
 	IF obj IS B.Node THEN node := obj(B.Node);
 		IF node.op # S.call THEN
-			IF node.left # NIL THEN Pass1(node.left);
+			IF node.left # NIL THEN ScanNode(node.left);
 				node.regUsed := node.left.regUsed;
 				node.xRegUsed := node.left.xRegUsed
 			END;
-			IF node.right # NIL THEN Pass1(node.right);
+			IF node.right # NIL THEN ScanNode(node.right);
 				node.regUsed := node.regUsed + node.right.regUsed;
 				node.xRegUsed := node.xRegUsed + node.right.xRegUsed
 			END;
@@ -696,7 +697,7 @@ BEGIN (* Pass1 *)
 			ELSIF node.op = S.semicolon THEN
 				node.regUsed := {}; node.xRegUsed := {}
 			END
-		ELSE Pass1(node.left);
+		ELSE ScanNode(node.left);
 			node.regUsed :=
 				{reg_A, reg_C, reg_D, reg_R8, reg_R9, reg_R10, reg_R11};
 			node.xRegUsed := {0..5};
@@ -704,13 +705,13 @@ BEGIN (* Pass1 *)
 			node.xRegUsed := node.xRegUsed + node.left.xRegUsed;
 			fpar := node.left.type.fields;
 			IF fpar # NIL THEN
-				ParNode(node.right(B.Node), fpar, 0);
+				ScanPar(node.right(B.Node), fpar, 0);
 				node.regUsed := node.regUsed + node.right.regUsed;
 				node.xRegUsed := node.xRegUsed + node.right.xRegUsed
 			END
 		END
 	END
-END Pass1;
+END ScanNode;
 
 PROCEDURE ScanDeclaration(decl: B.Ident; lev: INTEGER);
 	VAR obj: B.Object; procObj: B.Proc; proc: Proc;
@@ -724,8 +725,8 @@ BEGIN
 			IF curProc = NIL THEN procList := proc; curProc := proc
 			ELSE curProc.next := proc; curProc := proc
 			END;
-			IF procObj.statseq # NIL THEN Pass1(procObj.statseq) END;
-			IF procObj.return # NIL THEN Pass1(procObj.return) END
+			IF procObj.statseq # NIL THEN ScanNode(procObj.statseq) END;
+			IF procObj.return # NIL THEN ScanNode(procObj.return) END
 		ELSIF (lev = 0) & (obj IS B.Var) & ~(obj IS B.Str) THEN
 			(* fix global var address *)
 			fixAmount := (staticSize + 4095) DIV 4096 * 4096;
@@ -734,6 +735,22 @@ BEGIN
 		decl := decl.next
 	END
 END ScanDeclaration;
+
+PROCEDURE Pass1(modinit: B.Node);
+	VAR obj: B.Proc;
+BEGIN
+	ScanDeclaration(B.universe.first, 0);
+	
+	ScanNode(modinit);
+	IF curProc = NIL THEN NEW(procList); curProc := procList
+	ELSE NEW(curProc.next); curProc := curProc.next
+	END;
+	obj := B.NewProc(); obj.statseq := modinit; obj.locblksize := 0;
+	curProc.obj := obj; NewBlock(curProc.blk); modInitProc := curProc;
+	
+	NEW(curProc.next); curProc := curProc.next;
+	NewBlock(curProc.blk); trapProc := curProc
+END Pass1;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -842,13 +859,15 @@ PROCEDURE Trap(cond, trapno: INTEGER);
 	VAR blk1, blk2: Block;
 BEGIN
 	IF ~(cond IN {ccAlways, ccNever}) THEN
-		blk1 := curBlk; OpenBlock(cond);
-		blk2 := curBlk; OpenBlock(ccAlways); blk1.jDst := curBlk;
-		MoveRI(reg_A, 1, trapno); MoveRI(reg_C, 4, sPos); EmitBare(INT3);
-		OpenBlock(255); blk2.jDst := curBlk; FJump0(blk2); FJump0(blk1);
-		MergeFrom(blk1)
+		blk1 := curBlk; OpenBlock(negated(cond));
+		MoveRI(0, 1, trapno); MoveRI(1, 4, sPos);
+		blk2 := curBlk; OpenBlock(ccAlways);
+		blk1.jDst := curBlk; FJump(blk1);
+		blk2.jDst := trapProc.blk; blk2.call := TRUE
 	ELSIF cond = ccAlways THEN
-		MoveRI(reg_A, 1, trapno); MoveRI(reg_C, 4, sPos); EmitBare(INT3)
+		MoveRI(0, 1, trapno); MoveRI(1, 4, sPos);
+		blk2 := curBlk; OpenBlock(ccAlways);
+		blk2.jDst := trapProc.blk; blk2.call := TRUE
 	END
 END Trap;
 
@@ -2101,8 +2120,6 @@ BEGIN
 				END
 			END;
 			IF off # src.jmpOff THEN curBlk := src;
-				(*Sys.Console_WriteInt(off); Sys.Console_Write(' ');
-				Sys.Console_WriteInt(src.jmpOff); Sys.Console_WriteLn;*)
 				IF off < 0 THEN ASSERT(off > src.jmpOff)
 				ELSIF off > 0 THEN ASSERT(off < src.jmpOff)
 				END;
@@ -2137,20 +2154,44 @@ BEGIN
 	INC(pc, procCodeSize)
 END Procedure;
 
-PROCEDURE ModuleInit(statseq: B.Node);
-	VAR obj: B.Proc;
-BEGIN curProc := procList;
-	IF curProc = NIL THEN NEW(procList); curProc := procList
-	ELSE WHILE curProc.next # NIL DO curProc := curProc.next END;
-		NEW(curProc.next); curProc := curProc.next
-	END;
-	obj := B.NewProc(); obj.statseq := statseq; obj.locblksize := 0;
-	curProc.obj := obj; NewBlock(curProc.blk);
-	Linker.entry := pc; Procedure
-END ModuleInit;
+PROCEDURE TrapHandler;
+	VAR blk1: Block;
+BEGIN
+	trapProc.homeSpace := 0; trapProc.stack := 0;
+	trapProc.usedReg := {}; trapProc.usedXReg := {};
+	curBlk := trapProc.blk;
+
+	PopR(reg_A); EmitRI(SUBi, reg_SP, 8, 64);
+	
+	MoveRI(reg_A, 8, 0052004500530055H); (* RAX := 'USER' *)
+	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_A, 8);
+	MoveRI(reg_A, 8, 0044002E00320033H); (* RAX := '32.D' *)
+	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
+	MoveRI(reg_A, 4, 00000000004C004CH); (* RAX := 'LL' *)
+	SetRm_regI(reg_SP, 48); EmitRegRm(MOV, reg_A, 8);
+	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_C, 8); 
+	SetRm_regI(reg_B, B.LoadLibraryW_adr); EmitRm(CALL, 4);
+	
+	EmitRR(MOVd, reg_C, 8, reg_A);
+	MoveRI(reg_A, 8, 426567617373654DH); (* RAX := 'MessageB' *)
+	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_A, 8);
+	MoveRI(reg_A, 4, 000000000041786FH); (* RAX := 'oxA' *)
+	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
+	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_D, 8);
+	SetRm_regI(reg_B, B.GetProcAddress_adr); EmitRm(CALL, 4);
+	
+	EmitRR(XOR, reg_C, 4, reg_C);
+	EmitRR(XOR, reg_D, 4, reg_D);
+	EmitRR(XOR, reg_R8, 4, reg_R8);
+	EmitRR(XOR, reg_R9, 4, reg_R9);
+	SetRm_reg(reg_A); EmitRm(CALL, 4);
+	
+	EmitRR(XOR, reg_C, 4, reg_C);
+	SetRm_regI(reg_B, B.ExitProcess); EmitRm(CALL, 4)
+END TrapHandler;
 
 PROCEDURE MergeAllProcedure;
-	VAR proc: Proc; blk, src, dst: Block; off: INTEGER;
+	VAR proc: Proc; blk, src, dst: Block; off, n: INTEGER;
 BEGIN proc := procList;
 	WHILE proc # NIL DO blk := proc.blk; blk.proc := proc;
 		WHILE blk.next # NIL DO
@@ -2163,8 +2204,8 @@ BEGIN proc := procList;
 	END;
 	src := procList.blk;
 	WHILE src # NIL DO
-		IF ~src.finished THEN
-			IF ~src.call THEN ASSERT(src.load) END; dst := src.jDst; off := 0;
+		IF ~src.finished THEN dst := src.jDst; off := 0;
+			IF ~src.call THEN ASSERT(src.load) END;
 			IF src.no < dst.no THEN blk := src.next;
 				WHILE blk # dst DO INC(off, CodeLen1(blk)); blk := blk.next END
 			ELSE DEC(off, CodeLen1(src)); blk := dst;
@@ -2778,12 +2819,19 @@ PROCEDURE Generate*(modinit: B.Node);
 	VAR modkey: B.ModuleKey; n: INTEGER; str: B.String;
 BEGIN
 	(* Pass 1 *)
-	AllocStaticData; ScanDeclaration(B.universe.first, 0);
+	AllocStaticData; Pass1(modinit);
 	
 	(* Pass 2 *)
 	curProc := procList;
-	WHILE curProc # NIL DO Procedure; curProc := curProc.next END;
-	ModuleInit(modinit); MergeAllProcedure; DLLInit;
+	WHILE curProc # NIL DO
+		IF curProc # trapProc THEN
+			IF curProc = modInitProc THEN Linker.entry := pc END;
+			Procedure
+		ELSE TrapHandler
+		END;
+		curProc := curProc.next
+	END;
+	MergeAllProcedure; DLLInit;
 	
 	(* Linker *)
 	Sys.Seek(out, 400H - 16); modkey := B.modkey;
