@@ -109,18 +109,16 @@ VAR
 	(* forward decl *)
 	MakeItem0: PROCEDURE(VAR x: Item; obj: B.Object);
 
-	curBlk: Block; debugData: Sys.MemFile;
-	pc, sPos: INTEGER; modid: B.IdStr;
-	procList, curProc: Proc;
+	curBlk: Block; procList, curProc: Proc;
+	pc, sPos, varSize, staticSize: INTEGER; modid: B.IdStr;
 	modInitProc, trapProc, dllInitProc: Proc;
+	modidStr, errFmtStr: B.Str;
 
 	mem: RECORD
 		mod, rm, bas, idx, scl, disp: INTEGER
 	END;
 	allocReg, allocXReg: SET;
 	MkItmStat: MakeItemState; (* State for MakeItem procedures in Pass 2 *)
-	
-	varSize, staticSize: INTEGER;
 	
 	(* Linker state *)
 	Linker: RECORD
@@ -744,7 +742,9 @@ END ScanDeclaration;
 PROCEDURE Pass1(modinit: B.Node);
 	VAR obj: B.Proc;
 BEGIN
-	ScanDeclaration(B.universe.first, 0);
+	modidStr := B.NewStr2(modid);
+	errFmtStr := B.NewStr2('Error code: %d%sModule: %s%sSource pos: %d');
+	AllocStaticData; ScanDeclaration(B.universe.first, 0);
 	
 	ScanNode(modinit);
 	IF curProc = NIL THEN NEW(procList); curProc := procList
@@ -2171,7 +2171,8 @@ BEGIN
 	trapProc.usedReg := {}; trapProc.usedXReg := {};
 	curBlk := trapProc.blk;
 
-	PopR(reg_A); EmitRI(SUBi, reg_SP, 8, 64);
+	SetRm_reg(reg_A); EmitMOVZX(reg_R12, 1); EmitRR(MOVd, reg_R13, 8, reg_C);
+	PopR(reg_A); EmitRI(SUBi, reg_SP, 8, 2064 + 64);
 	
 	MoveRI(reg_A, 8, 0052004500530055H); (* RAX := 'USER' *)
 	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_A, 8);
@@ -2181,17 +2182,38 @@ BEGIN
 	SetRm_regI(reg_SP, 48); EmitRegRm(MOV, reg_A, 8);
 	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_C, 8); 
 	SetRm_regI(reg_B, B.LoadLibraryW_adr); EmitRm(CALL, 4);
+	EmitRR(MOVd, reg_SI, 8, reg_A);
 	
 	EmitRR(MOVd, reg_C, 8, reg_A);
+	MoveRI(reg_A, 8, 66746E6972707377H); (* RAX := 'wsprintf' *)
+	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_A, 8);
+	MoveRI(reg_A, 4, 0000000000000057H); (* RAX := 'W' *)
+	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
+	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_D, 8);
+	SetRm_regI(reg_B, B.GetProcAddress_adr); EmitRm(CALL, 4);
+	
+	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_C, 8);
+	SetRm_regI(reg_B, errFmtStr.adr); EmitRegRm(LEA, reg_D, 8);
+	EmitRR(MOVd, reg_R8, 8, reg_R12);
+	SetRm_regI(reg_SP, 56); EmitRegRm(LEA, reg_R9, 8);
+	SetRm_regI(reg_B, modidStr.adr); EmitRegRm(LEA, reg_R10, 8);
+	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_R10, 8);
+	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_R9, 8);
+	SetRm_regI(reg_SP, 48); EmitRegRm(MOV, reg_R13, 8);
+	MoveRI(reg_R10, 4, 00000000000A000DH);
+	SetRm_regI(reg_SP, 56); EmitRegRm(MOV, reg_R10, 8);
+	SetRm_reg(reg_A); EmitRm(CALL, 4);
+	
+	EmitRR(MOVd, reg_C, 8, reg_SI);
 	MoveRI(reg_A, 8, 426567617373654DH); (* RAX := 'MessageB' *)
 	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_A, 8);
-	MoveRI(reg_A, 4, 000000000041786FH); (* RAX := 'oxA' *)
+	MoveRI(reg_A, 4, 000000000057786FH); (* RAX := 'oxW' *)
 	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
 	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_D, 8);
 	SetRm_regI(reg_B, B.GetProcAddress_adr); EmitRm(CALL, 4);
 	
 	EmitRR(XOR, reg_C, 4, reg_C);
-	EmitRR(XOR, reg_D, 4, reg_D);
+	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_D, 8);
 	EmitRR(XOR, reg_R8, 4, reg_R8);
 	EmitRR(XOR, reg_R9, 4, reg_R9);
 	SetRm_reg(reg_A); EmitRm(CALL, 4);
@@ -2839,7 +2861,7 @@ PROCEDURE Generate*(modinit: B.Node);
 	VAR modkey: B.ModuleKey; n: INTEGER; str: B.String;
 BEGIN
 	(* Pass 1 *)
-	AllocStaticData; Pass1(modinit);
+	Pass1(modinit);
 	
 	(* Pass 2 *)
 	curProc := procList;

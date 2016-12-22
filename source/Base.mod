@@ -246,6 +246,12 @@ BEGIN
 	RETURN x
 END NewStr;
 
+PROCEDURE NewStr2*(str: String): Str;
+	VAR slen: INTEGER;
+BEGIN slen := 0; WHILE str[slen] # 0X DO INC(slen) END; INC(slen);
+	RETURN NewStr(str, slen)
+END NewStr2;
+
 PROCEDURE NewProc*(): Proc;
 	VAR p: Proc;
 BEGIN
