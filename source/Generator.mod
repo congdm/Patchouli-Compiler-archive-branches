@@ -2055,8 +2055,7 @@ PROCEDURE Procedure;
 		param, ident: B.Ident; pType: B.Type;
 BEGIN
 	curProc.homeSpace := 0; curProc.stack := 0;
-	curProc.usedReg := {}; curProc.usedXReg := {};
-	IF curProc.export THEN INCL(curProc.usedReg, reg_B) END;
+	curProc.usedReg := {reg_B}; curProc.usedXReg := {};
 	
 	obj := curProc.obj; obj.adr := pc;
 	curBlk := curProc.blk; epilog := curBlk;
@@ -2111,9 +2110,9 @@ BEGIN
 		END;
 		INC(r)
 	END;
-	IF curProc.export THEN
-		SetRm_RIP(-pc-CodeLen()-7); EmitRegRm(LEA, reg_B, 8)
-	END;
+
+	(* Load the base of current module to RBX *)
+	SetRm_RIP(-pc-CodeLen()-7); EmitRegRm(LEA, reg_B, 8);
 	
 	IF obj.type # NIL THEN
 		param := obj.type.fields; i := 0;
