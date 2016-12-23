@@ -593,7 +593,7 @@ BEGIN i := 0;
 	WHILE i < B.modno DO
 		imod := B.modList[i]; j := 0; WHILE imod.name[j] # 0X DO INC(j) END;
 		size := ((j+5)*2 + 15) DIV 16 * 16; INC(staticSize, size);
-		imod.adr := staticBase - staticSize; INC(i)
+		imod.adr := -staticSize; INC(i)
 	END
 END AllocImportModules;
 
@@ -601,7 +601,7 @@ PROCEDURE AllocImport*(x: B.Object; module: B.Module);
 	VAR p: B.Ident; adr: INTEGER;
 BEGIN
 	NEW(p); p.obj := x; p.next := module.impList;
-	module.impList := p; INC(staticSize, 8); adr := staticBase - staticSize;
+	module.impList := p; INC(staticSize, 8); adr := -staticSize;
 	IF x IS B.Var THEN x(B.Var).adr := adr
 	ELSIF x IS B.Proc THEN x(B.Proc).adr := adr
 	ELSIF x.class = B.cType THEN
@@ -620,13 +620,13 @@ BEGIN p := B.strList;
 		NaturalAlign(strSize); INC(staticSize, strSize);
 		IF strSize <= 8 THEN align := strSize ELSE align := 16 END;
 		staticSize := (staticSize + align - 1) DIV align * align;
-		x(B.Str).adr := staticBase - staticSize; p := p.next
+		x(B.Str).adr := -staticSize; p := p.next
 	END;
 	staticSize := (staticSize + 15) DIV 16 * 16; q := B.recList;
 	WHILE q # NIL DO
 		tdSize := (24 + 8*(B.MaxExt + q.type.nptr)) DIV 16 * 16;
 		q.a := tdSize; INC(staticSize, tdSize);
-		q.type.adr := staticBase - staticSize; q := q.next
+		q.type.adr := -staticSize; q := q.next
 	END
 END AllocStaticData;
 
@@ -748,13 +748,6 @@ END ScanDeclaration;
 PROCEDURE Pass1(modinit: B.Node);
 	VAR fixAmount: INTEGER; obj: B.Proc;
 BEGIN
-	(* fix static data address *)
-	staticBase := -((varSize + 4095) DIV 4096 * 4096);
-	INC(HeapHandle, staticBase); INC(ExitProcess, staticBase);
-	INC(LoadLibraryW, staticBase); INC(GetProcAddress, staticBase);
-	INC(GetProcessHeap, staticBase); INC(HeapAlloc, staticBase);
-	INC(HeapFree, staticBase);
-
 	modidStr := B.NewStr2(modid);
 	errFmtStr := B.NewStr2('Error code: %d%sModule: %s%sSource pos: %d');
 	AllocStaticData; ScanDeclaration(B.universe.first, 0);
@@ -2869,15 +2862,15 @@ BEGIN
 	Sys.Write4(out, 12);
 	Sys.SeekRel(out, 8 * 10);
 	
-	Write_SectionHeader (
-		'.data', -1073741760, Linker.data_rva, Linker.data_rawsize,
-		Linker.data_size, Linker.data_fadr
-	);
 	IF Linker.bss_size > 0 THEN
 		Write_SectionHeader(
 			'.bss', -1073741696, Linker.bss_rva, 0, Linker.bss_size, 0
 		)
 	END;
+	Write_SectionHeader (
+		'.data', -1073741760, Linker.data_rva, Linker.data_rawsize,
+		Linker.data_size, Linker.data_fadr
+	);
 	Write_SectionHeader (
 		'.text', 60000020H, Linker.code_rva, Linker.code_rawsize,
 		Linker.code_size, Linker.code_fadr
@@ -2937,9 +2930,9 @@ BEGIN
 	
 	Linker.bss_size := varSize; Align(Linker.bss_size, 4096);
 	
-	Linker.data_rva := 1000H;
-	Linker.bss_rva := Linker.data_rva + Linker.data_size;
-	Linker.code_rva := Linker.bss_rva + Linker.bss_size;
+	Linker.bss_rva := 1000H;
+	Linker.data_rva := Linker.bss_rva + Linker.bss_size;
+	Linker.code_rva := Linker.data_rva + Linker.data_size;
 	n := Linker.code_size; Align(n, 4096);
 	Linker.idata_rva := Linker.code_rva + n;
 	Linker.reloc_rva := Linker.idata_rva + 4096;
