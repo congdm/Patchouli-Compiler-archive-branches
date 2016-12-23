@@ -112,7 +112,7 @@ VAR
 	curBlk: Block; procList, curProc: Proc;
 	pc, sPos, varSize, staticSize, staticBase: INTEGER;
 	modInitProc, trapProc, dllInitProc: Proc;
-	modid: B.IdStr; modidStr, errFmtStr: B.Str;
+	modid: B.IdStr; modidStr, errFmtStr, err2FmtStr: B.Str;
 
 	mem: RECORD
 		mod, rm, bas, idx, scl, disp: INTEGER
@@ -750,9 +750,10 @@ PROCEDURE Pass1(modinit: B.Node);
 BEGIN
 	modidStr := B.NewStr2(modid);
 	errFmtStr := B.NewStr2('Error code: %d%sModule: %s%sSource pos: %d');
+	err2FmtStr := B.NewStr2('Module key of %s is mismatched%sModule: %s');
 	AllocStaticData; ScanDeclaration(B.universe.first, 0);
 	
-	ScanNode(modinit);
+	IF modinit # NIL THEN ScanNode(modinit) END;
 	IF curProc = NIL THEN NEW(procList); curProc := procList
 	ELSE NEW(curProc.next); curProc := curProc.next
 	END;
@@ -776,7 +777,8 @@ END negated;
 
 PROCEDURE FJump0(src: Block);
 	VAR off, cc: INTEGER; blk: Block;
-BEGIN off := 0; blk := src.next; cc := src.jc;
+BEGIN ASSERT(~src.finished);
+	off := 0; blk := src.next; cc := src.jc;
 	WHILE blk # src.jDst DO
 		ASSERT(blk.finished); INC(off, CodeLen0(blk)); blk := blk.next
 	END;
@@ -793,7 +795,8 @@ END FJump0;
 
 PROCEDURE FJump(src: Block);
 	VAR off, cc: INTEGER; blk: Block;
-BEGIN off := 0; blk := src.next; cc := src.jc;
+BEGIN ASSERT(~src.finished);
+	off := 0; blk := src.next; cc := src.jc;
 	WHILE blk # src.jDst DO INC(off, CodeLen1(blk)); blk := blk.next END;
 	IF (off > 0) & (cc # ccNever) THEN
 		src.jmpOff := off; blk := curBlk; curBlk := src; 
@@ -808,7 +811,8 @@ END FJump;
 
 PROCEDURE BJump(src: Block);
 	VAR off, cc: INTEGER; blk: Block;
-BEGIN off := -CodeLen0(src); blk := src.jDst; cc := src.jc;
+BEGIN ASSERT(~src.finished);
+	off := -CodeLen0(src); blk := src.jDst; cc := src.jc;
 	WHILE blk # src DO DEC(off, CodeLen1(blk)); blk := blk.next END;
 	IF off-2 >= -128 THEN DEC(off, 2)
 	ELSIF cc = ccAlways THEN DEC(off, 5) ELSE DEC(off, 6)
@@ -874,16 +878,27 @@ PROCEDURE Trap(cond, trapno: INTEGER);
 BEGIN
 	IF ~(cond IN {ccAlways, ccNever}) THEN
 		blk1 := curBlk; OpenBlock(negated(cond));
-		MoveRI(0, 1, trapno); MoveRI(1, 4, sPos);
+		MoveRI(reg_A, 1, trapno); MoveRI(reg_C, 4, sPos);
 		blk2 := curBlk; OpenBlock(ccAlways);
 		blk2.jDst := trapProc.blk; blk2.call := TRUE;
 		blk1.jDst := curBlk; FJump(blk1)
 	ELSIF cond = ccAlways THEN
-		MoveRI(0, 1, trapno); MoveRI(1, 4, sPos);
+		MoveRI(reg_A, 1, trapno); MoveRI(reg_C, 4, sPos);
 		blk2 := curBlk; OpenBlock(ccAlways);
 		blk2.jDst := trapProc.blk; blk2.call := TRUE
 	END
 END Trap;
+
+PROCEDURE ModKeyTrap(cond: INTEGER; imod: B.Module);
+	VAR blk1, blk2: Block;
+BEGIN
+	blk1 := curBlk; OpenBlock(negated(cond));
+	MoveRI(reg_A, 1, modkeyTrap);
+	SetRm_regI(reg_B, imod.adr); EmitRegRm(LEA, reg_C, 8);
+	blk2 := curBlk; OpenBlock(ccAlways);
+	blk2.jDst := trapProc.blk; blk2.call := TRUE;
+	blk1.jDst := curBlk; FJump(blk1)
+END ModKeyTrap;
 
 (* -------------------------------------------------------------------------- *)
 
@@ -1345,7 +1360,7 @@ END TypeTest;
 PROCEDURE Deref(VAR x: Item; node: B.Node);
 BEGIN
 	MakeItem0(x, node.left); Load(x);
-	(*EmitRR(TEST, x.r, 8, x.r); Trap(ccZ, nilTrap);*)
+	EmitRR(TEST, x.r, 8, x.r); Trap(ccZ, nilTrap);
 	x.mode := mRegI; x.a := 0
 END Deref;
 
@@ -1495,7 +1510,7 @@ BEGIN
 	IF node.left IS B.Proc THEN MakeItem0(x, node.left)
 	ELSE
 		AvoidUsedBy(node.right); MakeItem0(x, node.left);
-		Load(x); (*EmitRR(TEST, x.r, 8, x.r); Trap(ccZ, nilTrap)*)
+		Load(x); EmitRR(TEST, x.r, 8, x.r); Trap(ccZ, nilTrap)
 	END;
 	IF node.right # NIL THEN
 		Parameter(node.right(B.Node), procType.fields, 0)
@@ -1700,7 +1715,7 @@ END Repeat;
 
 PROCEDURE For(node: B.Node);
 	VAR i, b, e: Item; control, beg, end: B.Node; by: B.Object;
-		inc, op, opI: INTEGER; r, cc: BYTE; blk, blk2: Block;
+		inc, op, opI: INTEGER; r, cc: BYTE; orgBlk, blk1, blk2: Block;
 BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	control := node.left(B.Node); beg := control.right(B.Node);
 	end := beg.right(B.Node); by := end.right;
@@ -1717,7 +1732,7 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	ELSE cc := ccL; opI := SUBi; op := SUB
 	END;
 	
-	OpenBlock(255); blk := curBlk;
+	OpenBlock(255); orgBlk := curBlk;
 	AvoidUsedBy(end.left); MakeItem0(i, control.left); RefToRegI(i);
 	IF (e.mode = mImm) & SmallConst(e.a) THEN
 		SetRmOperand(i); EmitRmImm(CMPi, 8, e.a)
@@ -1725,7 +1740,7 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 		ResetMkItmStat; MakeItem0(e, end.left); Load(e);
 		SetRmOperand(i); EmitRegRm(CMP, e.r, 8); FreeReg(e.r)
 	END;
-	FreeReg2(i); OpenBlock(cc);
+	FreeReg2(i); blk1 := curBlk; OpenBlock(cc);
 	
 	MakeItem0(i, node.right); (* Statement sequence *)
 	MakeItem0(i, control.left); RefToRegI(i); SetRmOperand(i);
@@ -1733,8 +1748,9 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	ELSIF SmallConst(inc) THEN EmitRmImm(opI, 8, inc)
 	ELSE r := AllocReg(); LoadImm(r, 8, inc); EmitRegRm(op, r, 8)
 	END;
-	blk2 := curBlk; OpenBlock(ccAlways); blk2.jDst := blk;
-	blk.jDst := curBlk; BJump(blk2); FJump(blk);
+	blk2 := curBlk; OpenBlock(ccAlways);
+	blk2.jDst := orgBlk; BJump(blk2);
+	blk1.jDst := curBlk; FJump(blk1);
 	ResetMkItmStat; allocReg := {}; allocXReg := {}
 END For;
 
@@ -1785,8 +1801,9 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	ELSIF id = S.spASSERT THEN
 		LoadCond(x, obj1); curBlk.link := x.bLink;
 		x.bLink := curBlk; OpenBlock(x.c); FixLink(x.aLink);
-		MoveRI(0, 1, assertTrap); MoveRI(1, 4, sPos); EmitBare(INT3);
-		OpenBlock(255); FixLink(x.bLink)
+		MoveRI(0, 1, assertTrap); MoveRI(1, 4, sPos);
+		curBlk.call := TRUE; curBlk.jDst := trapProc.blk;
+		OpenBlock(ccAlways); FixLink(x.bLink)
 	ELSIF id = S.spPACK THEN
 		AvoidUsedBy(obj2); MakeItem0(x, obj1); RefToRegI(x); r := AllocReg();
 		SetRmOperand(x); EmitRegRm(MOVd, r, 8); ResetMkItmStat;
@@ -2007,13 +2024,13 @@ BEGIN
 	END
 END MakeItem;
 
-PROCEDURE Debug;
+PROCEDURE Debug(endBlk: Block);
 	VAR file: Sys.File; b: BYTE; rider: Sys.MemFileRider; blk: Block;
 		i: INTEGER;
 BEGIN
 	Sys.Rewrite(file, 'Test.dat');
 	blk := curProc.blk;
-	WHILE blk # NIL DO
+	WHILE blk # endBlk DO
 		Sys.SetMemFile(rider, blk.code, 0);
 		REPEAT Sys.ReadMemFile(rider, b);
 			IF ~rider.eof THEN Sys.Write1(file, b) END
@@ -2049,9 +2066,60 @@ BEGIN
 	END
 END SetPtrToNil;
 
+PROCEDURE MergeBlksOfProc;
+	VAR blk, src, dst: Block; off, procCodeSize: INTEGER;
+BEGIN
+	src := curProc.blk;
+	WHILE src # NIL DO
+		IF (src.jmpOff # 0) & ~src.call & ~src.load THEN
+			dst := src.jDst; off := 0;
+			IF src.no < dst.no THEN blk := src.next;
+				WHILE blk # dst DO
+					INC(off, CodeLen1(blk)); blk := blk.next
+				END
+			ELSE DEC(off, CodeLen0(src)); blk := dst;
+				WHILE blk # src DO
+					DEC(off, CodeLen1(blk)); blk := blk.next
+				END
+			END;
+			IF off # src.jmpOff THEN curBlk := src;
+				IF off < 0 THEN ASSERT(off > src.jmpOff)
+				ELSIF off > 0 THEN ASSERT(off < src.jmpOff)
+				END;
+				IF (src.jmpOff >= -128) & (src.jmpOff <= 127) THEN
+					SetCodePos(CodeLen()-2);
+					IF src.jc = ccAlways THEN Branch1(off)
+					ELSE CondBranch1(src.jc, off)
+					END
+				ELSIF src.jc = ccAlways THEN
+					SetCodePos(CodeLen()-5); Branch(off)
+				ELSE SetCodePos(CodeLen()-6); CondBranch(src.jc, off)
+				END
+			END
+		END;
+		src := src.next
+	END;
+
+	src := curProc.blk; procCodeSize := 0;
+	WHILE src # NIL DO
+		IF src.finished THEN blk := src.next;
+			WHILE (blk # NIL) & blk.finished DO
+				MergeNextBlock(src); blk := src.next
+			END;
+			src.jDst := NIL; src.link := NIL
+		END;
+		INC(procCodeSize, CodeLen1(src)); src := src.next
+	END;
+	IF procCodeSize MOD 16 # 0 THEN blk := curProc.blk;
+		WHILE blk.next # NIL DO blk := blk.next END; curBlk := blk;
+		WHILE procCodeSize MOD 16 # 0 DO INC(procCodeSize); Put1(90H) END
+	END;
+	INC(pc, procCodeSize)
+END MergeBlksOfProc;
+
 PROCEDURE Procedure;
-	VAR locblksize, nSave, nSaveX, n, i, j, off, procCodeSize: INTEGER;
-		r: BYTE; x: Item; blk, src, dst, epilog: Block; obj: B.Proc;
+	VAR locblksize, nSave, nSaveX, n, i, j: INTEGER;
+		r: BYTE; x: Item; epilog: Block; obj: B.Proc;
 		param, ident: B.Ident; pType: B.Type;
 BEGIN
 	curProc.homeSpace := 0; curProc.stack := 0;
@@ -2096,7 +2164,6 @@ BEGIN
 	IF n+curProc.homeSpace # 0 THEN
 		EmitRI(SUBi, reg_SP, 8, n+curProc.homeSpace)
 	END;
-	(*EmitRI(SUBi, reg_SP, 8, n); EmitRI(SUBi, reg_SP, 8, curProc.homeSpace);*)
 	
 	r := 0; i := 0; j := 0;
 	WHILE r < 16 DO
@@ -2147,62 +2214,18 @@ BEGIN
 	END;
 	EmitBare(LEAVE); EmitBare(RET);
 	
-	src := curProc.blk;
-	WHILE src # NIL DO
-		IF (src.jmpOff # 0) & ~src.call & ~src.load THEN
-			dst := src.jDst; off := 0;
-			IF src.no < dst.no THEN blk := src.next;
-				WHILE blk # dst DO
-					INC(off, CodeLen1(blk)); blk := blk.next
-				END
-			ELSE DEC(off, CodeLen0(src)); blk := dst;
-				WHILE blk # src DO
-					DEC(off, CodeLen1(blk)); blk := blk.next
-				END
-			END;
-			IF off # src.jmpOff THEN curBlk := src;
-				IF off < 0 THEN ASSERT(off > src.jmpOff)
-				ELSIF off > 0 THEN ASSERT(off < src.jmpOff)
-				END;
-				IF (src.jmpOff >= -128) & (src.jmpOff <= 127) THEN
-					SetCodePos(CodeLen()-2);
-					IF src.jc = ccAlways THEN Branch1(off)
-					ELSE CondBranch1(src.jc, off)
-					END
-				ELSIF src.jc = ccAlways THEN
-					SetCodePos(CodeLen()-5); Branch(off)
-				ELSE SetCodePos(CodeLen()-6); CondBranch(src.jc, off)
-				END
-			END
-		END;
-		src := src.next
-	END;
-
-	src := curProc.blk; procCodeSize := 0;
-	WHILE src # NIL DO
-		IF src.finished THEN blk := src.next;
-			WHILE (blk # NIL) & blk.finished DO
-				MergeNextBlock(src); blk := src.next
-			END;
-			src.jDst := NIL; src.link := NIL
-		END;
-		INC(procCodeSize, CodeLen1(src)); src := src.next
-	END;
-	IF procCodeSize MOD 16 # 0 THEN blk := curProc.blk;
-		WHILE blk.next # NIL DO blk := blk.next END; curBlk := blk;
-		WHILE procCodeSize MOD 16 # 0 DO INC(procCodeSize); Put1(90H) END
-	END;
-	INC(pc, procCodeSize)
+	MergeBlksOfProc
 END Procedure;
 
 PROCEDURE TrapHandler;
-	VAR procCodeSize: INTEGER;
+	VAR procCodeSize: INTEGER; blk1, blk2: Block;
 BEGIN
 	trapProc.homeSpace := 0; trapProc.stack := 0;
 	trapProc.usedReg := {}; trapProc.usedXReg := {};
 	curBlk := trapProc.blk;
 
-	SetRm_reg(reg_A); EmitMOVZX(reg_R12, 1); EmitRR(MOVd, reg_R13, 8, reg_C);
+	SetRm_reg(reg_A); EmitMOVZX(reg_R12, 1);
+	EmitRR(MOVd, reg_R13, 8, reg_C);
 	PopR(reg_A); EmitRI(SUBi, reg_SP, 8, 2064 + 64);
 	
 	MoveRI(reg_A, 8, 0052004500530055H); (* RAX := 'USER' *)
@@ -2223,6 +2246,8 @@ BEGIN
 	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_D, 8);
 	SetRm_regI(reg_B, GetProcAddress); EmitRm(CALL, 4);
 	
+	EmitRI(CMPi, reg_R12, 8, modkeyTrap); blk1 := curBlk; OpenBlock(ccZ);
+	
 	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_C, 8);
 	SetRm_regI(reg_B, errFmtStr.adr); EmitRegRm(LEA, reg_D, 8);
 	EmitRR(MOVd, reg_R8, 8, reg_R12);
@@ -2234,6 +2259,20 @@ BEGIN
 	MoveRI(reg_R10, 4, 00000000000A000DH);
 	SetRm_regI(reg_SP, 56); EmitRegRm(MOV, reg_R10, 8);
 	SetRm_reg(reg_A); EmitRm(CALL, 4);
+	
+	blk2 := curBlk; OpenBlock(ccAlways); blk1.jDst := curBlk;
+	
+	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_C, 8);
+	SetRm_regI(reg_B, err2FmtStr.adr); EmitRegRm(LEA, reg_D, 8);
+	EmitRR(MOVd, reg_R8, 8, reg_R13);
+	SetRm_regI(reg_SP, 56); EmitRegRm(LEA, reg_R9, 8);
+	SetRm_regI(reg_B, modidStr.adr); EmitRegRm(LEA, reg_R10, 8);
+	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_R10, 8);
+	MoveRI(reg_R10, 4, 00000000000A000DH);
+	SetRm_regI(reg_SP, 56); EmitRegRm(MOV, reg_R10, 8);
+	SetRm_reg(reg_A); EmitRm(CALL, 4);
+	
+	OpenBlock(255); blk2.jDst := curBlk; FJump(blk1); FJump(blk2);
 	
 	EmitRR(MOVd, reg_C, 8, reg_SI);
 	MoveRI(reg_A, 8, 426567617373654DH); (* RAX := 'MessageB' *)
@@ -2252,10 +2291,7 @@ BEGIN
 	EmitRR(XOR, reg_C, 4, reg_C);
 	SetRm_regI(reg_B, ExitProcess); EmitRm(CALL, 4);
 	
-	ASSERT(trapProc.blk.finished); ASSERT(trapProc.blk.next = NIL);
-	procCodeSize := CodeLen1(trapProc.blk);
-	WHILE procCodeSize MOD 16 # 0 DO INC(procCodeSize); Put1(90H) END;
-	INC(pc, procCodeSize)
+	MergeBlksOfProc
 END TrapHandler;
 
 PROCEDURE DLLInit;
@@ -2284,14 +2320,15 @@ BEGIN
 	WHILE i < B.modno DO imod := B.modList[i];
 		SetRm_regI(reg_B, imod.adr); EmitRegRm(LEA, reg_C, 8);
 		SetRm_regI(reg_B, LoadLibraryW); EmitRm(CALL, 4);
-		EmitRR(TEST, reg_A, 8, reg_A); Trap(ccZ, modkeyTrap);
+		EmitRR(TEST, reg_A, 8, reg_A); ModKeyTrap(ccZ, imod);
 		EmitRR(MOVd, reg_SI, 8, reg_A);
 		
 		(* Check module key *)
-		key := imod.key; MoveRI(reg_A, 8, key[0]); SetRm_regI(reg_SI, 400H-16);
-		EmitRegRm(CMPd, reg_A, 8); Trap(ccNZ, modkeyTrap);
+		key := imod.key;
+		MoveRI(reg_A, 8, key[0]); SetRm_regI(reg_SI, 400H-16);
+		EmitRegRm(CMPd, reg_A, 8); ModKeyTrap(ccNZ, imod);
 		MoveRI (reg_A, 8, key[1]); SetRm_regI(reg_SI, 400H-8);
-		EmitRegRm(CMPd, reg_A, 8); Trap(ccNZ, modkeyTrap);
+		EmitRegRm(CMPd, reg_A, 8); ModKeyTrap(ccNZ, imod);
 	
 		ident := imod.impList;
 		WHILE ident # NIL DO x := ident.obj;
