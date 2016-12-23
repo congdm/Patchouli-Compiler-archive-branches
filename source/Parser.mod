@@ -678,27 +678,19 @@ BEGIN Check0(S.lparen);
 		y := expression(); CheckInt(y); Check0(S.comma);
 		z := expression(); CheckInt(z);
 		x := NewNode(S.spCOPY, x, NewNode(S.null, y, z))
-	ELSIF f.id = B.spLoadLibraryW THEN
+	ELSIF f.id = S.spLoadLibraryW THEN
 		x := designator(); CheckVar(x, FALSE);
 		IF x.type # B.intType THEN Mark('not INTEGER') END; Check0(S.comma);
 		y := expression(); IF ~B.IsStr(y.type) THEN Mark('not string') END;
-		x := NewNode(S.becomes, x,
-			NewNode(S.call, B.LoadLibraryW, NewNode(S.par, y, NIL))
-		);
-		x(B.Node).right.type := B.intType
-	ELSIF f.id = B.spGetProcAddress THEN
+		x := NewNode(S.spLoadLibraryW, x, y)
+	ELSIF f.id = S.spGetProcAddress THEN
 		x := designator(); CheckVar(x, FALSE);
 		IF (x.type.form # B.tProc) & (x.type # B.intType) THEN
 			Mark('not INTEGER or procedure variable')
 		END; Check0(S.comma);
 		y := expression(); CheckInt(y); Check0(S.comma);
 		z := expression(); CheckInt(z);
-		x := NewNode(S.becomes, x,
-			NewNode(S.call, B.GetProcAddress,
-				NewNode(S.par, y, NewNode(S.par, z, NIL))
-			)
-		);
-		x(B.Node).right.type := B.intType
+		x := NewNode(S.spGetProcAddress, x, NewNode(S.null, y, z))
 	ELSIF f.id = S.spINT3 THEN
 		x := NewNode(f.id, NIL, NIL)
 	ELSE Mark('unsupported');

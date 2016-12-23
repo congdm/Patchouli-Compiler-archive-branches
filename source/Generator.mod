@@ -110,15 +110,21 @@ VAR
 	MakeItem0: PROCEDURE(VAR x: Item; obj: B.Object);
 
 	curBlk: Block; procList, curProc: Proc;
-	pc, sPos, varSize, staticSize: INTEGER; modid: B.IdStr;
+	pc, sPos, varSize, staticSize, staticBase: INTEGER;
 	modInitProc, trapProc, dllInitProc: Proc;
-	modidStr, errFmtStr: B.Str;
+	modid: B.IdStr; modidStr, errFmtStr: B.Str;
 
 	mem: RECORD
 		mod, rm, bas, idx, scl, disp: INTEGER
 	END;
 	allocReg, allocXReg: SET;
 	MkItmStat: MakeItemState; (* State for MakeItem procedures in Pass 2 *)
+	
+	
+	(* Static data address*)
+	(* Win32 specifics *)
+	HeapHandle, ExitProcess, LoadLibraryW, GetProcAddress: INTEGER;
+	GetProcessHeap, HeapAlloc, HeapFree: INTEGER;
 	
 	(* Linker state *)
 	Linker: RECORD
@@ -587,20 +593,20 @@ BEGIN i := 0;
 	WHILE i < B.modno DO
 		imod := B.modList[i]; j := 0; WHILE imod.name[j] # 0X DO INC(j) END;
 		size := ((j+5)*2 + 15) DIV 16 * 16; INC(staticSize, size);
-		imod.adr := -staticSize; INC(i)
+		imod.adr := staticBase - staticSize; INC(i)
 	END
 END AllocImportModules;
 
 PROCEDURE AllocImport*(x: B.Object; module: B.Module);
-	VAR p: B.Ident;
+	VAR p: B.Ident; adr: INTEGER;
 BEGIN
 	NEW(p); p.obj := x; p.next := module.impList;
-	module.impList := p; INC(staticSize, 8);
-	IF x IS B.Var THEN x(B.Var).adr := -staticSize
-	ELSIF x IS B.Proc THEN x(B.Proc).adr := -staticSize
+	module.impList := p; INC(staticSize, 8); adr := staticBase - staticSize;
+	IF x IS B.Var THEN x(B.Var).adr := adr
+	ELSIF x IS B.Proc THEN x(B.Proc).adr := adr
 	ELSIF x.class = B.cType THEN
-		IF x.type.form = B.tRec THEN x.type.adr := -staticSize
-		ELSIF x.type.form = B.tPtr THEN x.type.base.adr := -staticSize
+		IF x.type.form = B.tRec THEN x.type.adr := adr
+		ELSIF x.type.form = B.tPtr THEN x.type.base.adr := adr
 		END
 	END
 END AllocImport;
@@ -614,13 +620,13 @@ BEGIN p := B.strList;
 		NaturalAlign(strSize); INC(staticSize, strSize);
 		IF strSize <= 8 THEN align := strSize ELSE align := 16 END;
 		staticSize := (staticSize + align - 1) DIV align * align;
-		x(B.Str).adr := -staticSize; p := p.next
+		x(B.Str).adr := staticBase - staticSize; p := p.next
 	END;
 	staticSize := (staticSize + 15) DIV 16 * 16; q := B.recList;
 	WHILE q # NIL DO
 		tdSize := (24 + 8*(B.MaxExt + q.type.nptr)) DIV 16 * 16;
 		q.a := tdSize; INC(staticSize, tdSize);
-		q.type.adr := -staticSize; q := q.next
+		q.type.adr := staticBase - staticSize; q := q.next
 	END
 END AllocStaticData;
 
@@ -740,8 +746,15 @@ BEGIN
 END ScanDeclaration;
 
 PROCEDURE Pass1(modinit: B.Node);
-	VAR obj: B.Proc;
+	VAR fixAmount: INTEGER; obj: B.Proc;
 BEGIN
+	(* fix static data address *)
+	staticBase := -((varSize + 4095) DIV 4096 * 4096);
+	INC(HeapHandle, staticBase); INC(ExitProcess, staticBase);
+	INC(LoadLibraryW, staticBase); INC(GetProcAddress, staticBase);
+	INC(GetProcessHeap, staticBase); INC(HeapAlloc, staticBase);
+	INC(HeapFree, staticBase);
+
 	modidStr := B.NewStr2(modid);
 	errFmtStr := B.NewStr2('Error code: %d%sModule: %s%sSource pos: %d');
 	AllocStaticData; ScanDeclaration(B.universe.first, 0);
@@ -1765,9 +1778,9 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 		SetRmOperand(x); EmitRegRm(MOV, r, x.type.size)
 	ELSIF id = S.spNEW THEN
 		SetAlloc(reg_C); SetAlloc(reg_D); SetAlloc(reg_R8); SetAlloc(reg_A);
-		SetRm_regI(reg_B, B.HeapHandle); EmitRegRm(MOVd, reg_C, 8);
+		SetRm_regI(reg_B, HeapHandle); EmitRegRm(MOVd, reg_C, 8);
 		MoveRI(reg_D, 4, 8); size := obj1.type.base.size + 15 DIV 16 * 16;
-		MoveRI(reg_R8, 4, size + 16); SetRm_regI(reg_B, B.HeapAlloc);
+		MoveRI(reg_R8, 4, size + 16); SetRm_regI(reg_B, HeapAlloc);
 		EmitRm(CALL, 4); EmitRI(ADDi, reg_A, 8, 16); FreeReg(reg_C);
 		FreeReg(reg_D); FreeReg(reg_R8);
 		
@@ -1823,6 +1836,32 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 			IF x.r # reg_SI THEN RelocReg(x.r, reg_SI) END;
 			EmitRep(MOVSrep, size, 1)
 		END
+	ELSIF id = S.spLoadLibraryW THEN
+		MkItmStat.avoid := {0, 1, 2, 8 .. 11};
+		AvoidUsedBy(obj2); MakeItem0(x, obj1); ResetMkItmStat;
+		SetBestReg(reg_C); MakeItem0(y, obj2); LoadAdr(y);
+		IF y.r # reg_C THEN RelocReg(y.r, reg_C) END;
+		
+		SetRm_regI(reg_B, LoadLibraryW); EmitRm(CALL, 4);
+		FreeReg(reg_C); SetAlloc(reg_A);
+		
+		RefToRegI(x); SetRmOperand(x); EmitRegRm(MOV, reg_A, 8);
+		IF curProc.homeSpace < 32 THEN curProc.homeSpace := 32 END
+	ELSIF id = S.spGetProcAddress THEN
+		obj3 := obj2(B.Node).right; obj2 := obj2(B.Node).left;
+		MkItmStat.avoid := {0, 1, 2, 8 .. 11}; AvoidUsedBy(obj2);
+		AvoidUsedBy(obj3); MakeItem0(x, obj1); ResetMkItmStat;
+		AvoidUsedBy(obj3); SetAvoid(reg_D); SetBestReg(reg_C);
+		MakeItem0(y, obj2); Load(y); ResetMkItmStat;
+		SetBestReg(reg_D); MakeItem0(z, obj3); Load(z);
+		IF z.r # reg_D THEN RelocReg(y.r, reg_D) END;
+		IF y.r # reg_C THEN RelocReg(y.r, reg_C) END;
+		
+		SetRm_regI(reg_B, GetProcAddress); EmitRm(CALL, 4);
+		FreeReg(reg_C); FreeReg(reg_D); SetAlloc(reg_A);
+		
+		RefToRegI(x); SetRmOperand(x); EmitRegRm(MOV, reg_A, 8);
+		IF curProc.homeSpace < 32 THEN curProc.homeSpace := 32 END
 	ELSIF id = S.spINT3 THEN
 		EmitBare(INT3)
 	ELSE ASSERT(FALSE)
@@ -2181,7 +2220,7 @@ BEGIN
 	MoveRI(reg_A, 4, 00000000004C004CH); (* RAX := 'LL' *)
 	SetRm_regI(reg_SP, 48); EmitRegRm(MOV, reg_A, 8);
 	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_C, 8); 
-	SetRm_regI(reg_B, B.LoadLibraryW_adr); EmitRm(CALL, 4);
+	SetRm_regI(reg_B, LoadLibraryW); EmitRm(CALL, 4);
 	EmitRR(MOVd, reg_SI, 8, reg_A);
 	
 	EmitRR(MOVd, reg_C, 8, reg_A);
@@ -2190,7 +2229,7 @@ BEGIN
 	MoveRI(reg_A, 4, 0000000000000057H); (* RAX := 'W' *)
 	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
 	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_D, 8);
-	SetRm_regI(reg_B, B.GetProcAddress_adr); EmitRm(CALL, 4);
+	SetRm_regI(reg_B, GetProcAddress); EmitRm(CALL, 4);
 	
 	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_C, 8);
 	SetRm_regI(reg_B, errFmtStr.adr); EmitRegRm(LEA, reg_D, 8);
@@ -2210,7 +2249,7 @@ BEGIN
 	MoveRI(reg_A, 4, 000000000057786FH); (* RAX := 'oxW' *)
 	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
 	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_D, 8);
-	SetRm_regI(reg_B, B.GetProcAddress_adr); EmitRm(CALL, 4);
+	SetRm_regI(reg_B, GetProcAddress); EmitRm(CALL, 4);
 	
 	EmitRR(XOR, reg_C, 4, reg_C);
 	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_D, 8);
@@ -2219,7 +2258,7 @@ BEGIN
 	SetRm_reg(reg_A); EmitRm(CALL, 4);
 	
 	EmitRR(XOR, reg_C, 4, reg_C);
-	SetRm_regI(reg_B, B.ExitProcess); EmitRm(CALL, 4);
+	SetRm_regI(reg_B, ExitProcess); EmitRm(CALL, 4);
 	
 	ASSERT(trapProc.blk.finished); ASSERT(trapProc.blk.next = NIL);
 	procCodeSize := CodeLen1(trapProc.blk);
@@ -2245,14 +2284,14 @@ BEGIN
 	
 	PushR(reg_SI); PushR(reg_DI); PushR(reg_B); EmitRI(SUBi, reg_SP, 8, 32);
 	SetRm_RIP(-pc-CodeLen()-7); EmitRegRm(LEA, reg_B, 8);
-	SetRm_regI(reg_B, B.GetProcessHeap); EmitRm(CALL, 4);
-	SetRm_regI(reg_B, B.HeapHandle); EmitRegRm(MOV, reg_A, 8);
+	SetRm_regI(reg_B, GetProcessHeap); EmitRm(CALL, 4);
+	SetRm_regI(reg_B, HeapHandle); EmitRegRm(MOV, reg_A, 8);
 	
 	(* Import modules, if there are any *)
 	i := 0;
 	WHILE i < B.modno DO imod := B.modList[i];
 		SetRm_regI(reg_B, imod.adr); EmitRegRm(LEA, reg_C, 8);
-		SetRm_regI(reg_B, B.LoadLibraryW.adr); EmitRm(CALL, 4);
+		SetRm_regI(reg_B, LoadLibraryW); EmitRm(CALL, 4);
 		EmitRR(TEST, reg_A, 8, reg_A); Trap(ccZ, modkeyTrap);
 		EmitRR(MOVd, reg_SI, 8, reg_A);
 		
@@ -2275,7 +2314,7 @@ BEGIN
 				adr := x(B.Proc).adr; expno := x(B.Proc).expno
 			END;
 			EmitRR(MOVd, reg_C, 8, reg_SI); MoveRI(reg_D, 4, expno);
-			SetRm_regI(reg_B, B.GetProcAddress.adr); EmitRm(CALL, 4);
+			SetRm_regI(reg_B, GetProcAddress); EmitRm(CALL, 4);
 			SetRm_regI(reg_B, adr); EmitRegRm(MOV, reg_A, 8);
 			ident := ident.next
 		END;
@@ -2306,7 +2345,7 @@ BEGIN
 	
 	(* Exit *)
 	IF B.CplFlag.main THEN EmitRR(XOR, reg_C, 4, reg_C);
-		SetRm_regI(reg_B, B.ExitProcess); EmitRm(CALL, 4)
+		SetRm_regI(reg_B, ExitProcess); EmitRm(CALL, 4)
 	ELSE
 		MoveRI(reg_A, 4, 1); EmitRI(ADDi, reg_SP, 8, 32);
 		PopR(reg_B); PopR(reg_DI); PopR(reg_SI); EmitBare(RET)
@@ -2573,6 +2612,14 @@ BEGIN
 	B.setType.size := 8; B.setType.align := 8;
 	B.realType.size := 8; B.realType.align := 8;
 	B.nilType.size := 8; B.nilType.align := 8;
+	
+	HeapHandle := -64;
+	ExitProcess := -56;
+	LoadLibraryW := -48;
+	GetProcAddress := -40;
+	GetProcessHeap := -32;
+	HeapAlloc := -24;
+	HeapFree := -16;
 
 	Linker.startTime := Sys.GetTickCount();
 	Sys.Rewrite(out, tempOutputName);
@@ -2822,15 +2869,15 @@ BEGIN
 	Sys.Write4(out, 12);
 	Sys.SeekRel(out, 8 * 10);
 	
+	Write_SectionHeader (
+		'.data', -1073741760, Linker.data_rva, Linker.data_rawsize,
+		Linker.data_size, Linker.data_fadr
+	);
 	IF Linker.bss_size > 0 THEN
 		Write_SectionHeader(
 			'.bss', -1073741696, Linker.bss_rva, 0, Linker.bss_size, 0
 		)
 	END;
-	Write_SectionHeader (
-		'.data', -1073741760, Linker.data_rva, Linker.data_rawsize,
-		Linker.data_size, Linker.data_fadr
-	);
 	Write_SectionHeader (
 		'.text', 60000020H, Linker.code_rva, Linker.code_rawsize,
 		Linker.code_size, Linker.code_fadr
@@ -2890,9 +2937,9 @@ BEGIN
 	
 	Linker.bss_size := varSize; Align(Linker.bss_size, 4096);
 	
-	Linker.bss_rva := 1000H;
-	Linker.data_rva := Linker.bss_rva + Linker.bss_size;
-	Linker.code_rva := Linker.data_rva + Linker.data_size;
+	Linker.data_rva := 1000H;
+	Linker.bss_rva := Linker.data_rva + Linker.data_size;
+	Linker.code_rva := Linker.bss_rva + Linker.bss_size;
 	n := Linker.code_size; Align(n, 4096);
 	Linker.idata_rva := Linker.code_rva + n;
 	Linker.reloc_rva := Linker.idata_rva + 4096;

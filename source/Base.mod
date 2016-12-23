@@ -29,19 +29,7 @@ CONST
 	sfFLOOR* = 14; sfFLT* = 15; sfORD* = 16; sfCHR* = 17;
 	
 	spGET* = 18; spPUT* = 19; spCOPY* = 20;
-	spLoadLibraryW* = 21; spGetProcAddress* = 22;
 	sfADR* = 23; sfSIZE* = 24; sfBIT* = 25; sfVAL* = 26;
-	
-	(* Win32 specifics *)
-	HeapHandle* = -64;
-	ExitProcess* = -56;
-	LoadLibraryW_adr* = -48;
-	GetProcAddress_adr* = -40;
-	GetProcessHeap* = -32;
-	HeapAlloc* = -24;
-	HeapFree* = -16;
-	
-	TrapTable* = -72;
 	
 TYPE
 	IdStr* = S.IdStr;
@@ -109,8 +97,6 @@ VAR
 	intType*, byteType*, realType*: Type;
 	boolType*, setType*, charType*, nilType*, strType*: Type;
 	noType*: Type; predefinedTypes: ARRAY 32 OF Type;
-	
-	LoadLibraryW*, GetProcAddress*: Proc;
 	
 	topScope*, universe*, systemScope: Scope;
 	curLev*, modlev*: INTEGER; modid*: IdStr; modkey*: ModuleKey;
@@ -766,8 +752,8 @@ BEGIN
 	Enter(NewSProc(spGET, cSProc), 'GET');
 	Enter(NewSProc(spPUT, cSProc), 'PUT');
 	Enter(NewSProc(spCOPY, cSProc), 'COPY');
-	Enter(NewSProc(spLoadLibraryW, cSProc), 'LoadLibraryW');
-	Enter(NewSProc(spGetProcAddress, cSProc), 'GetProcAddress');
+	Enter(NewSProc(S.spLoadLibraryW, cSProc), 'LoadLibraryW');
+	Enter(NewSProc(S.spGetProcAddress, cSProc), 'GetProcAddress');
 	Enter(NewSProc(S.spINT3, cSProc), 'INT3');
 	
 	Enter(NewSProc(sfADR, cSFunc), 'ADR');
@@ -777,21 +763,6 @@ BEGIN
 	
 	Enter(NewTypeObj(byteType), 'BYTE');
 	systemScope := topScope; CloseScope;
-	
-	LoadLibraryW := NewProc(); LoadLibraryW.type := NewProcType();
-	OpenScope; Enter(NewPar(LoadLibraryW.type, strType, FALSE), '1');
-	LoadLibraryW.type.fields := topScope.first; CloseScope;
-	LoadLibraryW.type.parblksize := 8;
-	LoadLibraryW.type.base := intType;
-	LoadLibraryW.adr := -48;
-	
-	GetProcAddress := NewProc(); GetProcAddress.type := NewProcType();
-	OpenScope; Enter(NewPar(GetProcAddress.type, intType, FALSE), '2');
-	Enter(NewPar(GetProcAddress.type, intType, FALSE), '1');
-	GetProcAddress.type.fields := topScope.first; CloseScope;
-	GetProcAddress.type.parblksize := 16;
-	GetProcAddress.type.base := intType;
-	GetProcAddress.adr := -40;
 	
 	curLev := 0
 END Init;
