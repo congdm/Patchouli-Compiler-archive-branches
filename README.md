@@ -21,6 +21,7 @@ This compiler follows the latest [Oberon-07 Report](http://www.inf.ethz.ch/perso
 **Note: Their formal parameters are as follow:
 
 `PROCEDURE LoadLibraryW(VAR result: INTEGER; lpFileName: ARRAY OF CHAR);`
+
 `PROCEDURE GetProcAddress(VAR result: INTEGER or any procedure variable; hModule, lpProcName: INTEGER);`
 
 **Example usage:
