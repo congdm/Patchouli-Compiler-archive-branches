@@ -1,4 +1,5 @@
 MODULE Generator;
+(*$NEW BaseSys.New*)
 
 IMPORT
 	SYSTEM, Sys := BaseSys,
@@ -1794,17 +1795,10 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 		MakeItem0(y, obj2); Load(y); EmitRR(BTR, y.r, x.type.size, r);
 		SetRmOperand(x); EmitRegRm(MOV, r, x.type.size)
 	ELSIF id = S.spNEW THEN
-		SetAlloc(reg_C); SetAlloc(reg_D); SetAlloc(reg_R8); SetAlloc(reg_A);
-		SetRm_regI(reg_B, HeapHandle); EmitRegRm(MOVd, reg_C, 8);
-		MoveRI(reg_D, 4, 8); size := obj1.type.base.size + 15 DIV 16 * 16;
-		MoveRI(reg_R8, 4, size + 16); SetRm_regI(reg_B, HeapAlloc);
-		EmitRm(CALL, 4); EmitRI(ADDi, reg_A, 8, 16); FreeReg(reg_C);
-		FreeReg(reg_D); FreeReg(reg_R8);
-		
-		TypeDesc(y, obj1.type.base); LoadAdr(y);
-		SetRm_regI(reg_A, -8); EmitRegRm(MOV, y.r, 8); FreeReg2(y); 
-		MakeItem0(x, obj1); RefToRegI(x); SetRmOperand(x);
-		EmitRegRm(MOV, reg_A, 8); FreeReg2(x);
+		SetBestReg(reg_C); MakeItem0(x, obj1); LoadAdr(x);
+		IF x.r # reg_C THEN RelocReg(x.r, reg_C) END;
+		SetBestReg(reg_D); TypeDesc(y, obj1.type.base); LoadAdr(y);
+		curBlk.call := TRUE; curBlk.jDst := NEWProc.blk; OpenBlock(ccAlways);
 		IF curProc.homeSpace < 32 THEN curProc.homeSpace := 32 END
 	ELSIF id = S.spASSERT THEN
 		LoadCond(x, obj1); curBlk.link := x.bLink;
@@ -2302,16 +2296,17 @@ BEGIN
 	EmitRR(XOR, reg_C, 4, reg_C);
 	SetRm_regI(reg_B, ExitProcess); EmitRm(CALL, 4);
 	
-	OpenBlock(255); blk1.jDst := curBlk; FJump0(blk1);
+	OpenBlock(255); blk1.jDst := curBlk; FJump(blk1);
 	SetRm_regI(reg_B, adrOfNEW); EmitRm(JMP, 4);
 	
 	MergeBlksOfProc
 END ProcedureNEW;
 
 PROCEDURE DLLInit;
-	VAR i, adr, expno: INTEGER; blk: Block;
-		imod: B.Module; key: B.ModuleKey; ident: B.Ident; x: B.Object;
-		t: B.TypeList; tp: B.Type; 
+	VAR i, j, adr, expno: INTEGER; blk: Block;
+		imod: B.Module; key: B.ModuleKey;
+		ident: B.Ident; x: B.Object; t: B.TypeList; tp: B.Type;
+		str: B.String; modName, procName: B.IdStr;
 BEGIN
 	dllInitProc.homeSpace := 0; dllInitProc.stack := 0;
 	dllInitProc.usedReg := {}; dllInitProc.usedXReg := {};
@@ -2409,6 +2404,48 @@ BEGIN
 			EmitRegRm(MOV, reg_A, 8); tp := tp.base
 		END;
 		t := t.next
+	END;
+	
+	(* Install NEW procedure *)
+	IF B.CplFlag.new[0] # 0X THEN
+		str := B.CplFlag.new; j := 0; i := 0;
+		WHILE (str[j] = 20X) OR (str[j] = 9X) DO INC(j) END;
+		WHILE (str[j] # '.') & (str[j] # 0X) & (str[j] # 20X)
+			& (str[j] # 9X) & (i < LEN(modName)) DO
+			modName[i] := str[j]; INC(i); INC(j)
+		END;
+		IF i = LEN(modName) THEN DEC(i) END; modName[i] := 0X;
+		IF str[j] = '.' THEN INC(j); i := 0;
+			WHILE (str[j] # 20X) & (str[j] # 9X)
+				& (str[j] # 0X) & (i < LEN(procName)) DO
+				procName[i] := str[j]; INC(i); INC(j)
+			END;
+			IF i = LEN(procName) THEN DEC(i) END; procName[i] := 0X;
+			imod := B.FindModule(modName);
+			IF imod # NIL THEN ident := imod.first;
+				WHILE (ident # NIL) & (ident.name # procName) DO
+					ident := ident.next
+				END;
+				IF (ident # NIL) & (ident.obj IS B.Proc) THEN
+					expno := ident.obj(B.Proc).expno; 
+					SetRm_regI(reg_B, imod.adr); EmitRegRm(LEA, reg_C, 8);
+					SetRm_regI(reg_B, LoadLibraryW); EmitRm(CALL, 4);
+					
+					EmitRR(MOVd, reg_C, 8, reg_A); MoveRI(reg_D, 4, expno);
+					SetRm_regI(reg_B, GetProcAddress); EmitRm(CALL, 4);
+					SetRm_regI(reg_B, adrOfNEW); EmitRegRm(MOV, reg_A, 8);
+				END
+			END
+		ELSE ident := B.universe.first;
+			WHILE (ident # NIL) & (ident.name # modName) DO
+				ident := ident.next
+			END;
+			IF (ident # NIL) & (ident.obj IS B.Proc) THEN
+				adr := ident.obj(B.Proc).adr;
+				SetRm_regI(reg_B, adr); EmitRegRm(LEA, reg_A, 8);
+				SetRm_regI(reg_B, adrOfNEW); EmitRegRm(MOV, reg_A, 8)
+			END
+		END
 	END;
 	
 	(* Call module main procedure *)
@@ -2776,6 +2813,7 @@ BEGIN
 	END;
 	t := B.recList;
 	WHILE t # NIL DO
+		Sys.Seek(out, basefadr + t.type.adr); Sys.Write8(out, t.type.size);
 		Sys.Seek(out, basefadr + t.type.adr + 8 + B.MaxExt*8);
 		IF t.type.nptr > 0 THEN Write_pointer_offset(0, t.type) END;
 		Sys.Write8(out, -1); t := t.next

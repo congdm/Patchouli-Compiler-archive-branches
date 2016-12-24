@@ -1,6 +1,7 @@
 MODULE Parser;
+(*$NEW BaseSys.New*)
 
-IMPORT SYSTEM,
+IMPORT
 	Sys := BaseSys, Crypt,
 	S := Scanner, B := Base, G := Generator;
 	
@@ -636,8 +637,11 @@ END ConstExpression;
 (* -------------------------------------------------------------------------- *)
 
 PROCEDURE StdProc(f: B.SProc): B.Object;
-	VAR x, y, z, t: B.Object;
-BEGIN Check0(S.lparen);
+	VAR x, y, z, t: B.Object; hasParen: BOOLEAN;
+BEGIN hasParen := TRUE;
+	IF f.id # S.spINT3 THEN Check0(S.lparen)
+	ELSIF sym = S.lparen THEN GetSym ELSE hasParen := FALSE
+	END;
 	IF (f.id = B.spINC) OR (f.id = B.spDEC) THEN
 		x := designator(); CheckInt(x); CheckVar(x, FALSE);
 		IF sym = S.comma THEN
@@ -692,10 +696,10 @@ BEGIN Check0(S.lparen);
 		z := expression(); CheckInt(z);
 		x := NewNode(S.spGetProcAddress, x, NewNode(S.null, y, z))
 	ELSIF f.id = S.spINT3 THEN
-		x := NewNode(f.id, NIL, NIL)
+		x := NewNode(S.spINT3, NIL, NIL)
 	ELSE Mark('unsupported');
 	END;
-	Check0(S.rparen);
+	IF hasParen THEN Check0(S.rparen) END;
 	RETURN x
 END StdProc;
 
@@ -1150,7 +1154,7 @@ PROCEDURE Module*;
 BEGIN
 	GetSym; modid[0] := 0X;
 	IF sym = S.ident THEN modid := S.id; GetSym ELSE Missing(S.ident) END;
-	Check0(S.semicolon); B.Init(modid); G.Init(modid);
+	B.Init(modid); G.Init(modid); Check0(S.semicolon);
 	IF sym = S.import THEN ImportList END;
 	
 	IF S.errcnt = 0 THEN

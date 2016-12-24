@@ -1,4 +1,5 @@
 MODULE Base;
+(*$NEW BaseSys.New*)
 
 IMPORT
 	SYSTEM, Sys := BaseSys, Crypt, S := Scanner;
@@ -110,7 +111,8 @@ VAR
 	strbuf*: ARRAY 100000H OF CHAR; strbufSize*: INTEGER;
 	
 	CplFlag* : RECORD
-		main*, console*, debug*: BOOLEAN
+		main*, console*, debug*: BOOLEAN;
+		new*: String
 	END;
 	
 	ExportType0: PROCEDURE(typ: Type);
@@ -147,6 +149,9 @@ BEGIN n := 0; i := 1; k := 1;
 	UNTIL finish
 END ReadInt;
 
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
 PROCEDURE AppendStr*(ext: ARRAY OF CHAR; VAR dst: ARRAY OF CHAR);
 	VAR i, k: INTEGER;
 BEGIN i := 0; WHILE dst[i] # 0X DO INC(i) END;
@@ -154,12 +159,35 @@ BEGIN i := 0; WHILE dst[i] # 0X DO INC(i) END;
 	dst[i+k] := 0X
 END AppendStr;
 
+PROCEDURE StrPos*(pattern, s: ARRAY OF CHAR; pos: INTEGER): INTEGER;
+	VAR i, slen, plen: INTEGER; notfound, differ: BOOLEAN;
+BEGIN
+	IF pos < 0 THEN pos := 0 END;
+	slen := 0; WHILE s[slen] # 0X DO INC(slen) END;
+	plen := 0; WHILE pattern[plen] # 0X DO INC(plen) END;
+	IF (plen > 0) & (slen >= plen) THEN
+		notfound := TRUE;
+		WHILE notfound & (pos < slen) & (slen - pos >= plen) DO
+			i := 0;
+			REPEAT differ := s[pos + i] # pattern[i]; INC(i)
+			UNTIL differ OR (i = plen) OR (pos + i = slen);
+			notfound := differ; INC(pos)
+		END;
+		IF notfound THEN pos := -1 ELSE DEC(pos) END
+	ELSE pos := -1
+	END
+	RETURN pos
+END StrPos;
+
 PROCEDURE SetCompilerFlag*(pragma: ARRAY OF CHAR);
+	VAR i: INTEGER;
 BEGIN
 	IF pragma = 'MAIN' THEN CplFlag.main := TRUE
 	ELSIF pragma = 'CONSOLE' THEN
 		CplFlag.main := TRUE; CplFlag.console := TRUE
 	ELSIF pragma = 'DEBUG' THEN CplFlag.debug := TRUE
+	ELSIF StrPos('NEW ', pragma, 0) = 0 THEN i := 0;
+		WHILE pragma[i+4] # 0X DO CplFlag.new[i] := pragma[i+4]; INC(i) END
 	END
 END SetCompilerFlag;
 
@@ -513,7 +541,7 @@ END WriteSymfile;
 (* -------------------------------------------------------------------------- *)
 (* Import symbol file *)
 
-PROCEDURE FindModule(modname: IdStr): Module;
+PROCEDURE FindModule*(modname: IdStr): Module;
 	VAR i: INTEGER; module: Module;
 BEGIN module := NIL;
 	FOR i := 0 TO modno-1 DO
@@ -720,6 +748,7 @@ PROCEDURE Init*(modname: IdStr);
 BEGIN
 	NEW(universe); topScope := universe; curLev := -1;
 	modid := modname; modno := 0; strbufSize := 0;
+	CplFlag.new[0] := 0X;
 	
 	Enter(NewTypeObj(intType), 'INTEGER');
 	Enter(NewTypeObj(byteType), 'BYTE');

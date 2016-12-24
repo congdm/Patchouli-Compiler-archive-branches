@@ -1,4 +1,5 @@
 MODULE BaseSys;
+(*$NEW New*)
 
 IMPORT
 	SYSTEM;
@@ -435,6 +436,17 @@ BEGIN buf := GetCommandLineW(); i := 0;
 	END;
 	IF k < LEN(out) THEN out[k] := 0X END
 END GetArg;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE New*(VAR ptr: INTEGER; tdAdr: INTEGER);
+	VAR hHeap, size: INTEGER;
+BEGIN
+	hHeap := GetProcessHeap(); SYSTEM.GET(tdAdr, size);
+	ptr := HeapAlloc(hHeap, 8, size + 16); ASSERT(ptr # 0);
+	SYSTEM.PUT(ptr+8, tdAdr); INC(ptr, 16)
+END New;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
