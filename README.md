@@ -6,7 +6,7 @@ This compiler is based on Prof. Niklaus Wirth "Compiler Construction" book and t
 
 The goal is to implement a recursive descent compiler for Oberon-07 language, Intel 64 architecture.
 
-Previous named AyaCompiler, which was a single pass compiler. However, since the current version (which employs a syntax tree) is considerably different from the old one, I decide to change its name.
+Previously named AyaCompiler, which was a single pass compiler. However, since the current version (which employs a syntax tree) is considerably different from the old one, I decide to change its name.
 
 Binary is also supply with source.
 
