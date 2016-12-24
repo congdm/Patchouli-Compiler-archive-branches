@@ -111,8 +111,9 @@ VAR
 
 	curBlk: Block; procList, curProc: Proc;
 	pc, sPos, varSize, staticSize, staticBase: INTEGER;
-	modInitProc, trapProc, dllInitProc: Proc;
+	modInitProc, trapProc, NEWProc, dllInitProc: Proc;
 	modid: B.IdStr; modidStr, errFmtStr, err2FmtStr: B.Str;
+	err3FmtStr: B.Str;
 
 	mem: RECORD
 		mod, rm, bas, idx, scl, disp: INTEGER
@@ -125,6 +126,9 @@ VAR
 	(* Win32 specifics *)
 	HeapHandle, ExitProcess, LoadLibraryW, GetProcAddress: INTEGER;
 	GetProcessHeap, HeapAlloc, HeapFree: INTEGER;
+	MessageBoxW, wsprintfW: INTEGER;
+	(* others *)
+	adrOfNEW: INTEGER;
 	
 	(* Linker state *)
 	Linker: RECORD
@@ -751,6 +755,7 @@ BEGIN
 	modidStr := B.NewStr2(modid);
 	errFmtStr := B.NewStr2('Error code: %d%sModule: %s%sSource pos: %d');
 	err2FmtStr := B.NewStr2('Module key of %s is mismatched%sModule: %s');
+	err3FmtStr := B.NewStr2('Procedure NEW is not installed%sModule: %s');
 	AllocStaticData; ScanDeclaration(B.universe.first, 0);
 	
 	IF modinit # NIL THEN ScanNode(modinit) END;
@@ -762,6 +767,9 @@ BEGIN
 	
 	NEW(curProc.next); curProc := curProc.next;
 	NewBlock(curProc.blk); trapProc := curProc;
+	
+	NEW(curProc.next); curProc := curProc.next;
+	NewBlock(curProc.blk); NEWProc := curProc;
 	
 	NEW(curProc.next); curProc := curProc.next;
 	NewBlock(curProc.blk); dllInitProc := curProc
@@ -2220,7 +2228,6 @@ END Procedure;
 PROCEDURE TrapHandler;
 	VAR procCodeSize: INTEGER; blk1, blk2: Block;
 BEGIN
-	trapProc.homeSpace := 0; trapProc.stack := 0;
 	trapProc.usedReg := {}; trapProc.usedXReg := {};
 	curBlk := trapProc.blk;
 
@@ -2228,23 +2235,8 @@ BEGIN
 	EmitRR(MOVd, reg_R13, 8, reg_C);
 	PopR(reg_A); EmitRI(SUBi, reg_SP, 8, 2064 + 64);
 	
-	MoveRI(reg_A, 8, 0052004500530055H); (* RAX := 'USER' *)
-	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_A, 8);
-	MoveRI(reg_A, 8, 0044002E00320033H); (* RAX := '32.D' *)
-	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
-	MoveRI(reg_A, 4, 00000000004C004CH); (* RAX := 'LL' *)
-	SetRm_regI(reg_SP, 48); EmitRegRm(MOV, reg_A, 8);
-	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_C, 8); 
-	SetRm_regI(reg_B, LoadLibraryW); EmitRm(CALL, 4);
-	EmitRR(MOVd, reg_SI, 8, reg_A);
-	
-	EmitRR(MOVd, reg_C, 8, reg_A);
-	MoveRI(reg_A, 8, 66746E6972707377H); (* RAX := 'wsprintf' *)
-	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_A, 8);
-	MoveRI(reg_A, 4, 0000000000000057H); (* RAX := 'W' *)
-	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
-	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_D, 8);
-	SetRm_regI(reg_B, GetProcAddress); EmitRm(CALL, 4);
+	MoveRI(reg_A, 4, 00000000000A000DH);
+	SetRm_regI(reg_SP, 56); EmitRegRm(MOV, reg_A, 8);
 	
 	EmitRI(CMPi, reg_R12, 8, modkeyTrap); blk1 := curBlk; OpenBlock(ccZ);
 	
@@ -2256,9 +2248,7 @@ BEGIN
 	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_R10, 8);
 	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_R9, 8);
 	SetRm_regI(reg_SP, 48); EmitRegRm(MOV, reg_R13, 8);
-	MoveRI(reg_R10, 4, 00000000000A000DH);
-	SetRm_regI(reg_SP, 56); EmitRegRm(MOV, reg_R10, 8);
-	SetRm_reg(reg_A); EmitRm(CALL, 4);
+	SetRm_regI(reg_B, wsprintfW); EmitRm(CALL, 4);
 	
 	blk2 := curBlk; OpenBlock(ccAlways); blk1.jDst := curBlk;
 	
@@ -2268,31 +2258,55 @@ BEGIN
 	SetRm_regI(reg_SP, 56); EmitRegRm(LEA, reg_R9, 8);
 	SetRm_regI(reg_B, modidStr.adr); EmitRegRm(LEA, reg_R10, 8);
 	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_R10, 8);
-	MoveRI(reg_R10, 4, 00000000000A000DH);
-	SetRm_regI(reg_SP, 56); EmitRegRm(MOV, reg_R10, 8);
-	SetRm_reg(reg_A); EmitRm(CALL, 4);
+	SetRm_regI(reg_B, wsprintfW); EmitRm(CALL, 4);
 	
 	OpenBlock(255); blk2.jDst := curBlk; FJump(blk1); FJump(blk2);
-	
-	EmitRR(MOVd, reg_C, 8, reg_SI);
-	MoveRI(reg_A, 8, 426567617373654DH); (* RAX := 'MessageB' *)
-	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_A, 8);
-	MoveRI(reg_A, 4, 000000000057786FH); (* RAX := 'oxW' *)
-	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
-	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_D, 8);
-	SetRm_regI(reg_B, GetProcAddress); EmitRm(CALL, 4);
 	
 	EmitRR(XOR, reg_C, 4, reg_C);
 	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_D, 8);
 	EmitRR(XOR, reg_R8, 4, reg_R8);
 	EmitRR(XOR, reg_R9, 4, reg_R9);
-	SetRm_reg(reg_A); EmitRm(CALL, 4);
+	SetRm_regI(reg_B, MessageBoxW); EmitRm(CALL, 4);
 	
 	EmitRR(XOR, reg_C, 4, reg_C);
 	SetRm_regI(reg_B, ExitProcess); EmitRm(CALL, 4);
 	
 	MergeBlksOfProc
 END TrapHandler;
+
+PROCEDURE ProcedureNEW;
+	VAR blk1: Block;
+BEGIN
+	NEWProc.usedReg := {}; NEWProc.usedXReg := {};
+	curBlk := NEWProc.blk;
+
+	SetRm_regI(reg_B, adrOfNEW); EmitRmImm(CMPi, 8, 0);
+	blk1 := curBlk; OpenBlock(ccNZ);
+	
+	PopR(reg_A); EmitRI(SUBi, reg_SP, 8, 2064 + 64);
+	MoveRI(reg_A, 4, 00000000000A000DH);
+	SetRm_regI(reg_SP, 56); EmitRegRm(MOV, reg_A, 8);
+	
+	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_C, 8);
+	SetRm_regI(reg_B, err3FmtStr.adr); EmitRegRm(LEA, reg_D, 8);
+	SetRm_regI(reg_SP, 56); EmitRegRm(LEA, reg_R8, 8);
+	SetRm_regI(reg_B, modidStr.adr); EmitRegRm(LEA, reg_R9, 8);
+	SetRm_regI(reg_B, wsprintfW); EmitRm(CALL, 4);
+	
+	EmitRR(XOR, reg_C, 4, reg_C);
+	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_D, 8);
+	EmitRR(XOR, reg_R8, 4, reg_R8);
+	EmitRR(XOR, reg_R9, 4, reg_R9);
+	SetRm_regI(reg_B, MessageBoxW); EmitRm(CALL, 4);
+	
+	EmitRR(XOR, reg_C, 4, reg_C);
+	SetRm_regI(reg_B, ExitProcess); EmitRm(CALL, 4);
+	
+	OpenBlock(255); blk1.jDst := curBlk; FJump0(blk1);
+	SetRm_regI(reg_B, adrOfNEW); EmitRm(JMP, 4);
+	
+	MergeBlksOfProc
+END ProcedureNEW;
 
 PROCEDURE DLLInit;
 	VAR i, adr, expno: INTEGER; blk: Block;
@@ -2310,10 +2324,39 @@ BEGIN
 		MergeFrom(blk)
 	END;
 	
-	PushR(reg_SI); PushR(reg_DI); PushR(reg_B); EmitRI(SUBi, reg_SP, 8, 32);
+	PushR(reg_SI); PushR(reg_DI); PushR(reg_B); EmitRI(SUBi, reg_SP, 8, 64);
 	SetRm_RIP(-pc-CodeLen()-7); EmitRegRm(LEA, reg_B, 8);
 	SetRm_regI(reg_B, GetProcessHeap); EmitRm(CALL, 4);
 	SetRm_regI(reg_B, HeapHandle); EmitRegRm(MOV, reg_A, 8);
+	
+	(* Import USER32.DLL *)
+	MoveRI(reg_A, 8, 0052004500530055H); (* RAX := 'USER' *)
+	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_A, 8);
+	MoveRI(reg_A, 8, 0044002E00320033H); (* RAX := '32.D' *)
+	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
+	MoveRI(reg_A, 4, 00000000004C004CH); (* RAX := 'LL' *)
+	SetRm_regI(reg_SP, 48); EmitRegRm(MOV, reg_A, 8);
+	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_C, 8); 
+	SetRm_regI(reg_B, LoadLibraryW); EmitRm(CALL, 4);
+	EmitRR(MOVd, reg_SI, 8, reg_A);
+	
+	EmitRR(MOVd, reg_C, 8, reg_A);
+	MoveRI(reg_A, 8, 66746E6972707377H); (* RAX := 'wsprintf' *)
+	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_A, 8);
+	MoveRI(reg_A, 4, 0000000000000057H); (* RAX := 'W' *)
+	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
+	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_D, 8);
+	SetRm_regI(reg_B, GetProcAddress); EmitRm(CALL, 4);
+	SetRm_regI(reg_B, wsprintfW); EmitRegRm(MOV, reg_A, 8);
+	
+	EmitRR(MOVd, reg_C, 8, reg_SI);
+	MoveRI(reg_A, 8, 426567617373654DH); (* RAX := 'MessageB' *)
+	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_A, 8);
+	MoveRI(reg_A, 4, 000000000057786FH); (* RAX := 'oxW' *)
+	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_A, 8);
+	SetRm_regI(reg_SP, 32); EmitRegRm(LEA, reg_D, 8);
+	SetRm_regI(reg_B, GetProcAddress); EmitRm(CALL, 4);
+	SetRm_regI(reg_B, MessageBoxW); EmitRegRm(MOV, reg_A, 8);
 	
 	(* Import modules, if there are any *)
 	i := 0;
@@ -2376,7 +2419,7 @@ BEGIN
 	IF B.CplFlag.main THEN EmitRR(XOR, reg_C, 4, reg_C);
 		SetRm_regI(reg_B, ExitProcess); EmitRm(CALL, 4)
 	ELSE
-		MoveRI(reg_A, 4, 1); EmitRI(ADDi, reg_SP, 8, 32);
+		MoveRI(reg_A, 4, 1); EmitRI(ADDi, reg_SP, 8, 64);
 		PopR(reg_B); PopR(reg_DI); PopR(reg_SI); EmitBare(RET)
 	END
 END DLLInit;
@@ -2630,30 +2673,6 @@ END FoldConst;
 (* -------------------------------------------------------------------------- *)
 (* Linker *)
 
-PROCEDURE Init*(modid0: B.IdStr);
-BEGIN
-	modid := modid0; varSize := 0; staticSize := 128;
-	procList := NIL; curProc := NIL; pc := 0;
-	B.intType.size := 8; B.intType.align := 8;
-	B.byteType.size := 1; B.byteType.align := 1;
-	B.charType.size := 2; B.charType.align := 2;
-	B.boolType.size := 1; B.boolType.align := 1;
-	B.setType.size := 8; B.setType.align := 8;
-	B.realType.size := 8; B.realType.align := 8;
-	B.nilType.size := 8; B.nilType.align := 8;
-	
-	HeapHandle := -64;
-	ExitProcess := -56;
-	LoadLibraryW := -48;
-	GetProcAddress := -40;
-	GetProcessHeap := -32;
-	HeapAlloc := -24;
-	HeapFree := -16;
-
-	Linker.startTime := Sys.GetTickCount();
-	Sys.Rewrite(out, tempOutputName);
-END Init;
-
 PROCEDURE Align(VAR a: INTEGER; align: INTEGER);
 BEGIN
 	IF a > 0 THEN a := (a + align - 1) DIV align * align
@@ -2746,6 +2765,7 @@ BEGIN
 		END;
 		Sys.WriteStr(out, '.dll'); INC(i)	
 	END;
+	Sys.Seek(out, basefadr + adrOfNEW); Sys.Write8(out, 0);
 	ident := B.strList;
 	WHILE ident # NIL DO x := ident.obj(B.Str);
 		Sys.Seek(out, basefadr + x.adr); i := 0;
@@ -2942,9 +2962,11 @@ BEGIN
 	(* Pass 2 *)
 	curProc := procList;
 	WHILE curProc # NIL DO
-		IF (curProc # trapProc) & (curProc # dllInitProc) THEN
-			IF curProc = modInitProc THEN Linker.entry := pc END; Procedure
-		ELSIF curProc = trapProc THEN TrapHandler ELSE DLLInit
+		IF curProc = modInitProc THEN Procedure
+		ELSIF curProc = trapProc THEN TrapHandler
+		ELSIF curProc = dllInitProc THEN DLLInit
+		ELSIF curProc = NEWProc THEN ProcedureNEW
+		ELSE ASSERT(curProc.obj # NIL); Procedure
 		END;
 		curProc := curProc.next
 	END;
@@ -3007,6 +3029,33 @@ BEGIN
 	Sys.Console_WriteStr('Created binary file: ');
 	Sys.Console_WriteStr(str); Sys.Console_WriteLn
 END Generate;
+
+PROCEDURE Init*(modid0: B.IdStr);
+BEGIN
+	modid := modid0; varSize := 0; staticSize := 128;
+	procList := NIL; curProc := NIL; pc := 0;
+	B.intType.size := 8; B.intType.align := 8;
+	B.byteType.size := 1; B.byteType.align := 1;
+	B.charType.size := 2; B.charType.align := 2;
+	B.boolType.size := 1; B.boolType.align := 1;
+	B.setType.size := 8; B.setType.align := 8;
+	B.realType.size := 8; B.realType.align := 8;
+	B.nilType.size := 8; B.nilType.align := 8;
+	
+	adrOfNEW := -88;
+	wsprintfW := -80;
+	MessageBoxW := -72;
+	HeapHandle := -64;
+	ExitProcess := -56;
+	LoadLibraryW := -48;
+	GetProcAddress := -40;
+	GetProcessHeap := -32;
+	HeapAlloc := -24;
+	HeapFree := -16;
+
+	Linker.startTime := Sys.GetTickCount();
+	Sys.Rewrite(out, tempOutputName);
+END Init;
 
 BEGIN
 	MakeItem0 := MakeItem
