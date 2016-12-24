@@ -32,3 +32,18 @@ This compiler follows the latest [Oberon-07 Report](http://www.inf.ethz.ch/perso
 ### SYSTEM.LoadLibraryW and SYSTEM.GetProcAddress
 
 **Reason for introducing:** For calling external procedures of Win32 API and other languages.
+
+### Pragma
+Here is the list of compiler pragma:
+
+| Pragma         | Meaning                                                                                                                                 | Example usage                                                                                                                                                                                    |
+|----------------|-----------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `(*$MAIN*)`    | Generate .EXE file instead of .DLL                                                                                                      |                                                                                                                                                                                                  |
+| `(*$CONSOLE*)` | Same as `MAIN` but for console applications                                                                                             |                                                                                                                                                                                                  |
+| `(*$NEW*)`     | Install a procedure as the standard procedure `NEW`.<br> By default, `NEW` is not installed, so you need to install your own procedure. | `(*$NEW Proc*)` installs procedure `Proc` (in the same module) as `NEW` <br> `(*$NEW Mod.Proc*)` installs procedure `Proc` from module `Mod` as `NEW` (note: must import `Mod` in order to work) |
+
+All pragma should stay at the beginning of module for easy visibility.
+
+User-defined NEW procedure must have the formal parameters as follow:
+
+`PROCEDURE (VAR ptr: INTEGER; tdAdr: INTEGER)`
