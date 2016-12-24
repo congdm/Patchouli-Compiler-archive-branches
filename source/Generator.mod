@@ -125,8 +125,7 @@ VAR
 	
 	(* Static data address*)
 	(* Win32 specifics *)
-	HeapHandle, ExitProcess, LoadLibraryW, GetProcAddress: INTEGER;
-	GetProcessHeap, HeapAlloc, HeapFree: INTEGER;
+	ExitProcess, LoadLibraryW, GetProcAddress: INTEGER;
 	MessageBoxW, wsprintfW: INTEGER;
 	(* others *)
 	adrOfNEW: INTEGER;
@@ -139,7 +138,7 @@ VAR
 		code_rva, data_rva, idata_rva, reloc_rva, edata_rva: INTEGER;
 		code_fadr, data_fadr, idata_fadr, reloc_fadr, edata_fadr: INTEGER;
 		bss_size, bss_rva, startTime, endTime: INTEGER;
-		Kernel32Table: ARRAY 7 OF INTEGER
+		Kernel32Table: ARRAY 4 OF INTEGER
 	END;
 	out: Sys.File;
 		
@@ -184,13 +183,30 @@ BEGIN NEW(blk); blk.no := 0; blk.jc := 255; blk.jmpOff := 0;
 	Sys.NewMemFile(blk.code); Sys.SetMemFile(blk.rCode, blk.code, 0);
 END NewBlock;
 
-PROCEDURE OpenBlock(oldBlkCond: INTEGER);
+PROCEDURE CloseBlock0;
 	VAR newBlk: Block;
 BEGIN NewBlock(newBlk); newBlk.no := curBlk.no + 1;
-	newBlk.link := NIL; newBlk.jDst := NIL; curBlk.jc := oldBlkCond;
-	IF oldBlkCond # 255 THEN curBlk.finished := FALSE END;
+	newBlk.link := NIL; newBlk.jDst := NIL; curBlk.jc := 255;
 	curBlk.next := newBlk; curBlk := newBlk
-END OpenBlock;
+END CloseBlock0;
+
+PROCEDURE CloseBlock1(VAR oldBlk: Block; cond: INTEGER);
+	VAR newBlk: Block;
+BEGIN
+	oldBlk := curBlk; NewBlock(newBlk); newBlk.no := curBlk.no + 1;
+	newBlk.link := NIL; newBlk.jDst := NIL; curBlk.jc := cond;
+	IF cond # 255 THEN curBlk.finished := FALSE END;
+	curBlk.next := newBlk;  curBlk := newBlk
+END CloseBlock1;
+
+PROCEDURE CloseBlock2(VAR oldBlk: Block; callDst: Block);
+	VAR newBlk: Block;
+BEGIN
+	oldBlk := curBlk; NewBlock(newBlk); newBlk.no := curBlk.no + 1;
+	newBlk.link := NIL; newBlk.jDst := NIL; curBlk.jc := ccAlways;
+	curBlk.finished := FALSE; curBlk.jDst := callDst; curBlk.call := TRUE;
+	curBlk.next := newBlk; curBlk := newBlk
+END CloseBlock2;
 
 PROCEDURE Put1(n: INTEGER);
 BEGIN
@@ -886,26 +902,23 @@ PROCEDURE Trap(cond, trapno: INTEGER);
 	VAR blk1, blk2: Block;
 BEGIN
 	IF ~(cond IN {ccAlways, ccNever}) THEN
-		blk1 := curBlk; OpenBlock(negated(cond));
+		CloseBlock1(blk1, negated(cond));
 		MoveRI(reg_A, 1, trapno); MoveRI(reg_C, 4, sPos);
-		blk2 := curBlk; OpenBlock(ccAlways);
-		blk2.jDst := trapProc.blk; blk2.call := TRUE;
+		CloseBlock2(blk2, trapProc.blk);
 		blk1.jDst := curBlk; FJump(blk1)
 	ELSIF cond = ccAlways THEN
 		MoveRI(reg_A, 1, trapno); MoveRI(reg_C, 4, sPos);
-		blk2 := curBlk; OpenBlock(ccAlways);
-		blk2.jDst := trapProc.blk; blk2.call := TRUE
+		CloseBlock2(blk2, trapProc.blk)
 	END
 END Trap;
 
 PROCEDURE ModKeyTrap(cond: INTEGER; imod: B.Module);
 	VAR blk1, blk2: Block;
 BEGIN
-	blk1 := curBlk; OpenBlock(negated(cond));
+	CloseBlock1(blk1, negated(cond));
 	MoveRI(reg_A, 1, modkeyTrap);
 	SetRm_regI(reg_B, imod.adr); EmitRegRm(LEA, reg_C, 8);
-	blk2 := curBlk; OpenBlock(ccAlways);
-	blk2.jDst := trapProc.blk; blk2.call := TRUE;
+	CloseBlock2(blk2, trapProc.blk);
 	blk1.jDst := curBlk; FJump(blk1)
 END ModKeyTrap;
 
@@ -1059,15 +1072,14 @@ BEGIN RefToRegI(x);
 				ELSE EmitMOVZX(r, size)
 				END
 			ELSIF x.mode = mProc THEN
-				IF ~x.ref THEN blk := curBlk; OpenBlock(r);
+				IF ~x.ref THEN CloseBlock1(blk, r);
 					blk.jDst := x.aLink; blk.load := TRUE
 				ELSE SetRmOperand(x); EmitRegRm(MOVd, r, 8); x.ref := FALSE
 				END
 			ELSIF x.mode = mCond THEN
-				curBlk.link := x.aLink; x.aLink := curBlk;
-				OpenBlock(negated(x.c)); FixLink(x.bLink);
-				MoveRI(r, 4, 1); blk := curBlk; OpenBlock(ccAlways);
-				FixLink(x.aLink); EmitRR(XOR, r, 4, r); OpenBlock(255);
+				curBlk.link := x.aLink; CloseBlock1(x.aLink, negated(x.c));
+				FixLink(x.bLink); MoveRI(r, 4, 1); CloseBlock1(blk, ccAlways);
+				FixLink(x.aLink); EmitRR(XOR, r, 4, r); CloseBlock0;
 				blk.jDst := curBlk; FJump(blk)
 			ELSE ASSERT(FALSE)
 			END;
@@ -1230,13 +1242,13 @@ BEGIN
 		MakeItem0(y, node.right); Load(y);
 		IF x.r # reg_A THEN RelocReg(x.r, reg_A) END; SetAlloc(reg_D);
 		
-		EmitBare(CQO); EmitR(IDIVa, y.r, 8); EmitRR(TEST, reg_D, 8, reg_D);
-		blk1 := curBlk; OpenBlock(ccL);
-		blk2 := curBlk; OpenBlock(ccAlways); blk1.jDst := curBlk;
+		EmitBare(CQO); EmitR(IDIVa, y.r, 8);
+		EmitRR(TEST, reg_D, 8, reg_D); CloseBlock1(blk1, ccL);
+		CloseBlock1(blk2, ccAlways); blk1.jDst := curBlk;
 		IF node.op = S.div THEN EmitRI(SUBi, reg_A, 8, 1)
 		ELSE EmitRR(ADDd, reg_D, 8, y.r)
 		END;
-		OpenBlock(255); blk2.jDst := curBlk;
+		CloseBlock0; blk2.jDst := curBlk;
 		FJump0(blk2); FJump0(blk1); MergeFrom(blk1);
 		
 		IF node.op = S.div THEN FreeReg(reg_D)
@@ -1269,17 +1281,17 @@ END LoadCond;
 
 PROCEDURE And(VAR x: Item; node: B.Node);
 	VAR y: Item;
-BEGIN
-	LoadCond(x, node.left); curBlk.link := x.aLink; x.aLink := curBlk;
-	OpenBlock(negated(x.c)); FixLink(x.bLink); LoadCond(y, node.right);
+BEGIN LoadCond(x, node.left);
+	curBlk.link := x.aLink; CloseBlock1(x.aLink, negated(x.c));
+	FixLink(x.bLink); LoadCond(y, node.right);
 	x.aLink := merged(y.aLink, x.aLink); x.bLink := y.bLink; x.c := y.c
 END And;
 
 PROCEDURE Or(VAR x: Item; node: B.Node);
 	VAR y: Item;
-BEGIN
-	LoadCond(x, node.left); curBlk.link := x.bLink; x.bLink := curBlk;
-	OpenBlock(x.c); FixLink(x.aLink); LoadCond(y, node.right);
+BEGIN LoadCond(x, node.left);
+	curBlk.link := x.bLink; CloseBlock1(x.bLink, x.c);
+	FixLink(x.aLink); LoadCond(y, node.right);
 	x.bLink := merged(y.bLink, x.bLink); x.aLink := y.aLink; x.c := y.c
 END Or;
 
@@ -1292,7 +1304,7 @@ END Not;
 
 PROCEDURE Compare(VAR x: Item; node: B.Node);
 	VAR cond: INTEGER; cx, r: BYTE; oldStat: MakeItemState;
-		y, len: Item; tp: B.Type; blk1, blk2, blk3: Block;		
+		y, len: Item; tp: B.Type; orgBlk, blk1, blk2, blk3: Block;		
 BEGIN ResetMkItmStat2(oldStat); tp := node.left.type;
 	IF tp.form IN B.typScalar - {B.tReal} THEN
 		LoadLeftRight2(x, y, node); EmitRR(CMPd, x.r, 8, y.r);
@@ -1309,9 +1321,9 @@ BEGIN ResetMkItmStat2(oldStat); tp := node.left.type;
 		SetBestReg(reg_DI); MakeItem0(y, node.right); LoadAdr(y);
 		IF y.r # reg_DI THEN RelocReg(y.r, reg_DI) END;
 		IF x.r # reg_SI THEN RelocReg(x.r, reg_SI) END;
-		
 		cx := AllocReg2({}); EmitRR(XOR, cx, 4, cx);
-		OpenBlock(255); EmitRI(ADDi, cx, 8, 1);
+		
+		CloseBlock0; orgBlk := curBlk; EmitRI(ADDi, cx, 8, 1);
 		
 		ArrayLen(len, node.left);
 		IF len.mode = mImm THEN
@@ -1331,11 +1343,9 @@ BEGIN ResetMkItmStat2(oldStat); tp := node.left.type;
 		END;
 		Trap(ccA, stringTrap);
 		
-		EmitBare(CMPSW);
-		blk1 := curBlk; OpenBlock(ccNZ);
-		SetRm_regI(reg_SI, -2); EmitRmImm(CMPi, 2, 0);
-		blk2 := curBlk; OpenBlock(ccNZ);
-		blk1.jDst := curBlk; blk2.jDst := blk1; FJump(blk1); BJump(blk2);
+		EmitBare(CMPSW); CloseBlock1(blk1, ccNZ);
+		SetRm_regI(reg_SI, -2); EmitRmImm(CMPi, 2, 0); CloseBlock1(blk2, ccNZ);
+		blk1.jDst := curBlk; blk2.jDst := orgBlk; FJump(blk1); BJump(blk2);
 		FreeReg(reg_DI); FreeReg(reg_SI); SetCond(x, OpToCc(node.op))
 	ELSE ASSERT(FALSE)
 	END;
@@ -1517,8 +1527,7 @@ BEGIN
 	END;
 	
 	IF node.left IS B.Proc THEN MakeItem0(x, node.left)
-	ELSE
-		AvoidUsedBy(node.right); MakeItem0(x, node.left);
+	ELSE AvoidUsedBy(node.right); MakeItem0(x, node.left);
 		Load(x); EmitRR(TEST, x.r, 8, x.r); Trap(ccZ, nilTrap)
 	END;
 	IF node.right # NIL THEN
@@ -1526,9 +1535,7 @@ BEGIN
 	END;
 	IF x.mode = mReg THEN SetRm_reg(x.r); EmitRm(CALL, 4)
 	ELSIF x.ref THEN SetRmOperand(x); EmitRm(CALL, 4)
-	ELSE
-		blk := curBlk; OpenBlock(ccAlways); blk.call := TRUE;
-		blk.jDst := FindProcBlk(node.left)
+	ELSE CloseBlock2(blk, FindProcBlk(node.left))
 	END;
 	MkItmStat := oldStat; allocReg := oldAlloc; allocXReg := oldXAlloc;
 	IF procType.base # NIL THEN
@@ -1547,9 +1554,10 @@ PROCEDURE StdFunc(VAR x: Item; node: B.Node);
 		par1, par2: B.Node; obj1, obj2: B.Object;
 BEGIN id := node.op; obj1 := node.left; obj2 := node.right;
 	IF id = S.sfABS THEN MakeItem0(x, obj1); Load(x);
-		IF x.type.form = B.tInt THEN EmitRR(TEST, x.r, 8, x.r);
-			blk := curBlk; OpenBlock(ccGE); EmitR(NEG, x.r, 8);
-			OpenBlock(255); blk.jDst := curBlk; FJump0(blk); MergeFrom(blk)
+		IF x.type.form = B.tInt THEN
+			EmitRR(TEST, x.r, 8, x.r); CloseBlock1(blk, ccGE);
+			EmitR(NEG, x.r, 8); CloseBlock0; blk.jDst := curBlk;
+			FJump0(blk); MergeFrom(blk)
 		ELSIF x.type = B.realType THEN
 			r := AllocReg2({}); SetRm_reg(r);
 			EmitXmmRm(SseMOVDd, x.r, 8); EmitRI(BTRi, r, 8, 63);
@@ -1631,8 +1639,7 @@ BEGIN id := node.op; obj1 := node.left; obj2 := node.right;
 END StdFunc;
 
 PROCEDURE Becomes(node: B.Node);
-	VAR x, y, z: Item; cx, rsize: INTEGER;
-		orgBlk, blk2: Block;
+	VAR x, y, z: Item; cx, rsize: INTEGER; orgBlk, blk2: Block;
 BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	IF ~(node.left.type.form IN {B.tArray, B.tRec}) THEN
 		AvoidUsedBy(node.right); MakeItem0(x, node.left); ResetMkItmStat;
@@ -1655,14 +1662,14 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 		ELSIF B.IsStr(x.type) THEN
 			SetAlloc(reg_A); SetAlloc(reg_C);
 			EmitRR(XOR, reg_C, 4, reg_C); EmitRR(XOR, reg_A, 4, reg_A);
-			orgBlk := curBlk; OpenBlock(255); EmitRI(ADDi, reg_C, 8, 1);
+			CloseBlock0; orgBlk := curBlk; EmitRI(ADDi, reg_C, 8, 1);
 			ArrayLen(z, node.left); Load(z); EmitRR(CMPd, reg_C, 8, z.r);
 			Trap(ccA, stringTrap); FreeReg(z.r);
 			ArrayLen(z, node.right); Load(z); EmitRR(CMPd, reg_C, 8, z.r);
 			Trap(ccA, stringTrap); FreeReg(z.r);
 			
 			EmitBare(LODSW); EmitBare(STOSW); EmitRR(TEST, reg_A, 4, reg_A);
-			blk2 := curBlk; OpenBlock(ccNZ); blk2.jDst := blk2; BJump(blk2);
+			CloseBlock1(blk2, ccNZ); blk2.jDst := orgBlk; BJump(blk2);
 		ELSIF B.IsOpenArray(y.type) THEN
 			SetAlloc(reg_C); ArrayLen(z, node.right); SetRmOperand(z);
 			EmitRegRm(MOVd, reg_C, 8); EmitRI(CMPi, reg_C, 8, x.type.len);
@@ -1685,11 +1692,12 @@ END Becomes;
 PROCEDURE If(node: B.Node);
 	VAR x, y: Item; blk: Block; then: B.Node;
 BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
-	LoadCond(x, node.left); curBlk.link := x.aLink; x.aLink := curBlk;
-	OpenBlock(negated(x.c)); FixLink(x.bLink); then := node.right(B.Node);
-	MakeItem0(y, then.left); blk := curBlk; OpenBlock(ccAlways);
-	FixLink(x.aLink); IF then.right # NIL THEN MakeItem0(y, then.right) END;
-	OpenBlock(255); blk.jDst := curBlk; FJump(blk);
+	LoadCond(x, node.left); curBlk.link := x.aLink;
+	CloseBlock1(x.aLink, negated(x.c)); FixLink(x.bLink);
+	then := node.right(B.Node); MakeItem0(y, then.left);
+	CloseBlock1(blk, ccAlways); FixLink(x.aLink);
+	IF then.right # NIL THEN MakeItem0(y, then.right) END;
+	CloseBlock0; blk.jDst := curBlk; FJump(blk);
 	ResetMkItmStat; allocReg := {}; allocXReg := {}
 END If;
 
@@ -1698,14 +1706,14 @@ PROCEDURE While(node: B.Node; first: Block);
 BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	IF first = NIL THEN
 		IF CodeLen() = 0 THEN first := curBlk
-		ELSE OpenBlock(255); first := curBlk
+		ELSE CloseBlock0; first := curBlk
 		END
 	END;
-	LoadCond(x, node.left);
-	curBlk.link := x.aLink; x.aLink := curBlk; OpenBlock(negated(x.c));
-	FixLink(x.bLink); do := node.right(B.Node); MakeItem0(y, do.left);
-	blk := curBlk; OpenBlock(ccAlways);
-	blk.jDst := first; BJump(blk); FixLink(x.aLink);
+	LoadCond(x, node.left); curBlk.link := x.aLink;
+	CloseBlock1(x.aLink, negated(x.c)); FixLink(x.bLink);
+	do := node.right(B.Node); MakeItem0(y, do.left);
+	CloseBlock1(blk, ccAlways); FixLink(x.aLink);
+	blk.jDst := first; BJump(blk);
 	IF do.right # NIL THEN While(do.right(B.Node), first) END;
 	ResetMkItmStat; allocReg := {}; allocXReg := {}
 END While;
@@ -1714,10 +1722,10 @@ PROCEDURE Repeat(node: B.Node);
 	VAR x, y: Item; first, blk: Block;
 BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	IF CodeLen() = 0 THEN first := curBlk
-	ELSE OpenBlock(255); first := curBlk
+	ELSE CloseBlock0; first := curBlk
 	END;
 	MakeItem0(x, node.left); LoadCond(y, node.right);
-	curBlk.link := y.aLink; y.aLink := curBlk; OpenBlock(negated(y.c));
+	curBlk.link := y.aLink; CloseBlock1(y.aLink, negated(y.c));
 	FixLinkWith(y.aLink, first); FixLink(y.bLink);
 	ResetMkItmStat; allocReg := {}; allocXReg := {}
 END Repeat;
@@ -1741,7 +1749,7 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	ELSE cc := ccL; opI := SUBi; op := SUB
 	END;
 	
-	OpenBlock(255); orgBlk := curBlk;
+	CloseBlock0; orgBlk := curBlk;
 	AvoidUsedBy(end.left); MakeItem0(i, control.left); RefToRegI(i);
 	IF (e.mode = mImm) & SmallConst(e.a) THEN
 		SetRmOperand(i); EmitRmImm(CMPi, 8, e.a)
@@ -1749,7 +1757,7 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 		ResetMkItmStat; MakeItem0(e, end.left); Load(e);
 		SetRmOperand(i); EmitRegRm(CMP, e.r, 8); FreeReg(e.r)
 	END;
-	FreeReg2(i); blk1 := curBlk; OpenBlock(cc);
+	FreeReg2(i); CloseBlock1(blk1, cc);
 	
 	MakeItem0(i, node.right); (* Statement sequence *)
 	MakeItem0(i, control.left); RefToRegI(i); SetRmOperand(i);
@@ -1757,7 +1765,7 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	ELSIF SmallConst(inc) THEN EmitRmImm(opI, 8, inc)
 	ELSE r := AllocReg(); LoadImm(r, 8, inc); EmitRegRm(op, r, 8)
 	END;
-	blk2 := curBlk; OpenBlock(ccAlways);
+	CloseBlock1(blk2, ccAlways);
 	blk2.jDst := orgBlk; BJump(blk2);
 	blk1.jDst := curBlk; FJump(blk1);
 	ResetMkItmStat; allocReg := {}; allocXReg := {}
@@ -1797,15 +1805,14 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	ELSIF id = S.spNEW THEN
 		SetBestReg(reg_C); MakeItem0(x, obj1); LoadAdr(x);
 		IF x.r # reg_C THEN RelocReg(x.r, reg_C) END;
-		SetBestReg(reg_D); TypeDesc(y, obj1.type.base); LoadAdr(y);
-		curBlk.call := TRUE; curBlk.jDst := NEWProc.blk; OpenBlock(ccAlways);
+		SetBestReg(reg_D); TypeDesc(y, obj1.type.base);
+		LoadAdr(y); CloseBlock2(blk1, NEWProc.blk);
 		IF curProc.homeSpace < 32 THEN curProc.homeSpace := 32 END
 	ELSIF id = S.spASSERT THEN
 		LoadCond(x, obj1); curBlk.link := x.bLink;
-		x.bLink := curBlk; OpenBlock(x.c); FixLink(x.aLink);
+		CloseBlock1(x.bLink, x.c); FixLink(x.aLink);
 		MoveRI(0, 1, assertTrap); MoveRI(1, 4, sPos);
-		curBlk.call := TRUE; curBlk.jDst := trapProc.blk;
-		OpenBlock(ccAlways); FixLink(x.bLink)
+		CloseBlock2(blk1, trapProc.blk); FixLink(x.bLink)
 	ELSIF id = S.spPACK THEN
 		AvoidUsedBy(obj2); MakeItem0(x, obj1); RefToRegI(x); r := AllocReg();
 		SetRmOperand(x); EmitRegRm(MOVd, r, 8); ResetMkItmStat;
@@ -2133,7 +2140,7 @@ BEGIN
 	curProc.stack := locblksize; curProc.pStk := locblksize;
 	
 	IF (obj.statseq # NIL) OR (obj.return # NIL) THEN
-		OpenBlock(255); ident := obj.decl;
+		CloseBlock0; ident := obj.decl;
 		WHILE ident # NIL DO
 			IF (ident.obj IS B.Var) & ~(ident.obj IS B.Par) THEN
 				IF ident.obj.type.nptr > 0 THEN
@@ -2232,7 +2239,7 @@ BEGIN
 	MoveRI(reg_A, 4, 00000000000A000DH);
 	SetRm_regI(reg_SP, 56); EmitRegRm(MOV, reg_A, 8);
 	
-	EmitRI(CMPi, reg_R12, 8, modkeyTrap); blk1 := curBlk; OpenBlock(ccZ);
+	EmitRI(CMPi, reg_R12, 8, modkeyTrap); CloseBlock1(blk1, ccZ);
 	
 	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_C, 8);
 	SetRm_regI(reg_B, errFmtStr.adr); EmitRegRm(LEA, reg_D, 8);
@@ -2244,7 +2251,7 @@ BEGIN
 	SetRm_regI(reg_SP, 48); EmitRegRm(MOV, reg_R13, 8);
 	SetRm_regI(reg_B, wsprintfW); EmitRm(CALL, 4);
 	
-	blk2 := curBlk; OpenBlock(ccAlways); blk1.jDst := curBlk;
+	CloseBlock1(blk2, ccAlways); blk1.jDst := curBlk;
 	
 	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_C, 8);
 	SetRm_regI(reg_B, err2FmtStr.adr); EmitRegRm(LEA, reg_D, 8);
@@ -2254,7 +2261,7 @@ BEGIN
 	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_R10, 8);
 	SetRm_regI(reg_B, wsprintfW); EmitRm(CALL, 4);
 	
-	OpenBlock(255); blk2.jDst := curBlk; FJump(blk1); FJump(blk2);
+	CloseBlock0; blk2.jDst := curBlk; FJump(blk1); FJump(blk2);
 	
 	EmitRR(XOR, reg_C, 4, reg_C);
 	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_D, 8);
@@ -2274,8 +2281,8 @@ BEGIN
 	NEWProc.usedReg := {}; NEWProc.usedXReg := {};
 	curBlk := NEWProc.blk;
 
-	SetRm_regI(reg_B, adrOfNEW); EmitRmImm(CMPi, 8, 0);
-	blk1 := curBlk; OpenBlock(ccNZ);
+	SetRm_regI(reg_B, adrOfNEW);
+	EmitRmImm(CMPi, 8, 0); CloseBlock1(blk1, ccNZ);
 	
 	PopR(reg_A); EmitRI(SUBi, reg_SP, 8, 2064 + 64);
 	MoveRI(reg_A, 4, 00000000000A000DH);
@@ -2296,7 +2303,7 @@ BEGIN
 	EmitRR(XOR, reg_C, 4, reg_C);
 	SetRm_regI(reg_B, ExitProcess); EmitRm(CALL, 4);
 	
-	OpenBlock(255); blk1.jDst := curBlk; FJump(blk1);
+	CloseBlock0; blk1.jDst := curBlk; FJump(blk1);
 	SetRm_regI(reg_B, adrOfNEW); EmitRm(JMP, 4);
 	
 	MergeBlksOfProc
@@ -2314,15 +2321,12 @@ BEGIN
 
 	IF B.CplFlag.debug THEN EmitBare(INT3) END;
 	IF ~B.CplFlag.main THEN
-		EmitRI(CMPi, reg_D, 4, 1); blk := curBlk; OpenBlock(ccZ);
-		EmitBare(RET); OpenBlock(255); blk.jDst := curBlk; FJump0(blk);
-		MergeFrom(blk)
+		EmitRI(CMPi, reg_D, 4, 1); CloseBlock1(blk, ccZ); EmitBare(RET);
+		CloseBlock0; blk.jDst := curBlk; FJump0(blk); MergeFrom(blk)
 	END;
 	
 	PushR(reg_SI); PushR(reg_DI); PushR(reg_B); EmitRI(SUBi, reg_SP, 8, 64);
 	SetRm_RIP(-pc-CodeLen()-7); EmitRegRm(LEA, reg_B, 8);
-	SetRm_regI(reg_B, GetProcessHeap); EmitRm(CALL, 4);
-	SetRm_regI(reg_B, HeapHandle); EmitRegRm(MOV, reg_A, 8);
 	
 	(* Import USER32.DLL *)
 	MoveRI(reg_A, 8, 0052004500530055H); (* RAX := 'USER' *)
@@ -2449,8 +2453,7 @@ BEGIN
 	END;
 	
 	(* Call module main procedure *)
-	blk := curBlk; OpenBlock(ccAlways); blk.call := TRUE;
-	blk.jDst := modInitProc.blk; Linker.entry := pc;
+	CloseBlock2(blk, modInitProc.blk); Linker.entry := pc;
 	
 	(* Exit *)
 	IF B.CplFlag.main THEN EmitRR(XOR, reg_C, 4, reg_C);
@@ -2749,12 +2752,6 @@ BEGIN
 	Sys.WriteAnsiStr(out, 'LoadLibraryW');
 	Sys.Seek(out, Linker.idata_fadr + hint_rva + (64 + 2));
 	Sys.WriteAnsiStr(out, 'GetProcAddress');
-	Sys.Seek(out, Linker.idata_fadr + hint_rva + (96 + 2));
-	Sys.WriteAnsiStr(out, 'GetProcessHeap');
-	Sys.Seek(out, Linker.idata_fadr + hint_rva + (128 + 2));
-	Sys.WriteAnsiStr(out, 'HeapAlloc');
-	Sys.Seek(out, Linker.idata_fadr + hint_rva + (160 + 2));
-	Sys.WriteAnsiStr(out, 'HeapFree')
 END Write_idata_section;
 
 PROCEDURE Write_pointer_offset(offset: INTEGER; type: B.Type);
@@ -3080,16 +3077,12 @@ BEGIN
 	B.realType.size := 8; B.realType.align := 8;
 	B.nilType.size := 8; B.nilType.align := 8;
 	
-	adrOfNEW := -88;
-	wsprintfW := -80;
-	MessageBoxW := -72;
-	HeapHandle := -64;
-	ExitProcess := -56;
-	LoadLibraryW := -48;
-	GetProcAddress := -40;
-	GetProcessHeap := -32;
-	HeapAlloc := -24;
-	HeapFree := -16;
+	adrOfNEW := -56;
+	wsprintfW := -48;
+	MessageBoxW := -40;
+	ExitProcess := -32;
+	LoadLibraryW := -24;
+	GetProcAddress := -16;
 
 	Linker.startTime := Sys.GetTickCount();
 	Sys.Rewrite(out, tempOutputName);

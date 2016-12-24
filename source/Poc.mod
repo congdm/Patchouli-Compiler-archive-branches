@@ -1,7 +1,7 @@
-MODULE AyaCompile;
+MODULE Poc;
 (*$CONSOLE*)
 
-IMPORT SYSTEM,
+IMPORT
 	Sys := BaseSys, Scanner, Parser;
 	
 VAR
@@ -21,9 +21,9 @@ BEGIN
 		ELSE Sys.Console_WriteStr('File not found')
 		END
 	ELSE
-		Sys.Console_WriteStr('AyaCompiler v0.8-alpha for Oberon-07 language');
+		Sys.Console_WriteStr('Patchouli Oberon-07 Compiler v0.8c');
 		Sys.Console_WriteLn;
- 		Sys.Console_WriteStr('Usage: AyaCompile <inputfile>');
+ 		Sys.Console_WriteStr('Usage: Poc <inputfile>');
 		Sys.Console_WriteLn
 	END
-END AyaCompile.
+END Poc.
