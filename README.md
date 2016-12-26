@@ -20,13 +20,15 @@ This compiler follows the latest [Oberon-07 Report](http://www.inf.ethz.ch/perso
 
 **Note: Their formal parameters are as follow:
 
-`PROCEDURE LoadLibraryW(VAR result: INTEGER; lpFileName: ARRAY OF CHAR);`
+```modula-2
+PROCEDURE LoadLibraryW(VAR result: INTEGER; lpFileName: ARRAY OF CHAR);
 
-`PROCEDURE GetProcAddress(VAR result: INTEGER or any procedure variable; hModule, lpProcName: INTEGER);`
+PROCEDURE GetProcAddress(VAR result: INTEGER or any procedure type; hModule, lpProcName: INTEGER);
+```
 
 **Example usage:
 
-```
+```modula-2
 PROCEDURE ImportProc;
 VAR user32, i: INTEGER;
 	ansiStr: ARRAY 256 OF BYTE;
@@ -54,7 +56,9 @@ All pragma should stay at the beginning of module for easy visibility.
 
 User-defined NEW procedure must have the formal parameters as follow:
 
-`PROCEDURE (VAR ptr: INTEGER; tdAdr: INTEGER);`
+```modula-2
+PROCEDURE (VAR ptr: INTEGER; tdAdr: INTEGER);
+```
 
 See PROCEDURE New in module BaseSys for example implementation. Type desc structure is same as in Project Oberon, with each word be 64-bit, instead of 32-bit, and the max level of extension is 7, instead of 3.
 
