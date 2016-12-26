@@ -75,3 +75,14 @@ Another example of runtime guard, this time, is the ability to verify the interf
 ![alt text](https://cloud.githubusercontent.com/assets/2053094/21479512/a0594792-cb87-11e6-9a13-e05a1abf0004.png "Module guard")
 
 Arithmetic overflow is not checked, as same as in Project Oberon 2013.
+
+### Data types
+
+| Type    | Size (in bytes) | Note                                               |
+|---------|-----------------|----------------------------------------------------|
+| BOOLEAN |        1        |                                                    |
+| CHAR    |        2        |                                                    |
+| INTEGER |        8        |                                                    |
+| REAL    |        8        | Windows x64 standard floating point type           |
+| BYTE    |        1        | Same as in Project Oberon 2013, BYTE = SYSTEM.BYTE |
+| SET     |        8        | With 64 elements, SET is powerful now              |
