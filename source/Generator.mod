@@ -1841,8 +1841,8 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	ELSIF id = S.spASSERT THEN
 		LoadCond(x, obj1); curBlk.link := x.bLink;
 		CloseBlock1(x.bLink, x.c); FixLink(x.aLink);
-		CloseBlock2(blk1, trapProc.blk);
-		blk1.jc := assertTrap; FixLink(x.bLink)
+		CloseBlock2(blk1, trapProc.blk); FixLink(x.bLink);
+		blk1.jc := assertTrap; blk1.srcPos := sPos
 	ELSIF id = S.spPACK THEN
 		AvoidUsedBy(obj2); MakeItem0(x, obj1); RefToRegI(x); r := AllocReg();
 		SetRmOperand(x); EmitRegRm(MOVd, r, 8); ResetMkItmStat;
@@ -1982,7 +1982,12 @@ BEGIN imm := node.right(B.Const).val;
 		ELSE EmitRmImm(BTRi, x.type.size, imm MOD 64)
 		END;
 		ResetMkItmStat; allocReg := {}; allocXReg := {}
-	ELSE ASSERT(FALSE)
+	ELSIF node.op = S.spPUT THEN
+		ResetMkItmStat; allocReg := {}; allocXReg := {};
+		MakeItem0(x, node.left); Load(x); SetRm_regI(x.r, 0);
+		EmitRmImm(MOVi, node.right.type.size, imm);
+		ResetMkItmStat; allocReg := {}; allocXReg := {}
+	ELSE Sys.Console_WriteInt(sPos); ASSERT(FALSE)
 	END
 END OpImm;
 
@@ -2260,7 +2265,7 @@ PROCEDURE TrapHandler;
 	VAR blk, blk2: Block;
 BEGIN
 	trapProc.usedReg := {}; trapProc.usedXReg := {};
-	curBlk := trapProc.blk;
+	curBlk := trapProc.blk; (*EmitBare(INT3);*)
 	
 	PopR(reg_D); EmitRI(SUBi, reg_SP, 8, 2064 + 64);
 	

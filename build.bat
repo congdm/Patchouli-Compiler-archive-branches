@@ -1,3 +1,4 @@
+cd source
 ..\bin\Poc BaseSys.mod
 ..\bin\Poc Crypt.mod
 ..\bin\Poc Scanner.mod
@@ -5,3 +6,6 @@
 ..\bin\Poc Generator.mod
 ..\bin\Poc Parser.mod
 ..\bin\Poc Poc.mod
+cd ..
+cd lib
+..\bin\Poc Rtl.mod

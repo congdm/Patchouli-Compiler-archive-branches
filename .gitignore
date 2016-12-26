@@ -1,9 +1,7 @@
 source/*.exe
 source/*.dll
-source/*.sym
+*.sym
 test/*.exe
 test/*.dll
-test/*.sym
-source/.vs/
-bin/.vs/
-bin1/.vs/
+lib/*.dll
+*.vs/
