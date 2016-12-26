@@ -523,6 +523,12 @@ BEGIN
 	END
 END ReadMemFile;
 
+PROCEDURE MemFileToDisk*(mf: MemFile; VAR file: File);
+	VAR byteWritten: INTEGER;
+BEGIN byteWritten := mf.len;
+	WriteBytes2(file, mf.ptr, byteWritten) 
+END MemFileToDisk;
+
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 

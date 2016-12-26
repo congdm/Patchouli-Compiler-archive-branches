@@ -1,6 +1,6 @@
 MODULE Test2;
 
 VAR
-	x*: INTEGER;
+	x: INTEGER;
 
 END Test2.

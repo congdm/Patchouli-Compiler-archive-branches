@@ -88,7 +88,7 @@ TYPE
 	BlockDesc = RECORD
 		code: Sys.MemFile; rCode: Sys.MemFileRider;
 		jc: BYTE; call, load, finished: BOOLEAN; proc: Proc;
-		no, jmpOff: INTEGER; next, link, jDst: Block
+		no, jmpOff, srcPos: INTEGER; next, link, jDst: Block
 	END;
 	
 	ProcDesc = RECORD
@@ -112,9 +112,9 @@ VAR
 
 	curBlk: Block; procList, curProc: Proc;
 	pc, sPos, varSize, staticSize, staticBase: INTEGER;
-	modInitProc, trapProc, NEWProc, dllInitProc: Proc;
+	modInitProc, trapProc, trapProc2, NEWProc, dllInitProc: Proc;
 	modid: B.IdStr; modidStr, errFmtStr, err2FmtStr: B.Str;
-	err3FmtStr: B.Str;
+	err3FmtStr: B.Str; debugData: Sys.MemFile;
 
 	mem: RECORD
 		mod, rm, bas, idx, scl, disp: INTEGER
@@ -125,7 +125,7 @@ VAR
 	
 	(* Static data address*)
 	(* Win32 specifics *)
-	ExitProcess, LoadLibraryW, GetProcAddress: INTEGER;
+	GetModuleHandleExW, ExitProcess, LoadLibraryW, GetProcAddress: INTEGER;
 	MessageBoxW, wsprintfW: INTEGER;
 	(* others *)
 	adrOfNEW: INTEGER;
@@ -133,12 +133,13 @@ VAR
 	(* Linker state *)
 	Linker: RECORD
 		imagebase, entry : INTEGER;
-		code_rawsize, data_rawsize, edata_rawsize, debug_rawsize: INTEGER;
-		code_size, data_size, edata_size, debug_size: INTEGER;
+		code_rawsize, data_rawsize, edata_rawsize : INTEGER;
+		code_size, data_size, edata_size: INTEGER;
 		code_rva, data_rva, idata_rva, reloc_rva, edata_rva: INTEGER;
 		code_fadr, data_fadr, idata_fadr, reloc_fadr, edata_fadr: INTEGER;
+		debug_rawsize, debug_size, debug_rva, debug_fadr: INTEGER;
 		bss_size, bss_rva, startTime, endTime: INTEGER;
-		Kernel32Table: ARRAY 4 OF INTEGER
+		Kernel32Table: ARRAY 5 OF INTEGER
 	END;
 	out: Sys.File;
 		
@@ -238,6 +239,7 @@ PROCEDURE CodeLen1(blk: Block): INTEGER;
 BEGIN res := Sys.MemFileLength(blk.code);
 	IF ~blk.finished THEN
 		IF blk.load THEN INC(res, 7)
+		ELSIF blk.call THEN INC(res, 5)
 		ELSIF blk.jc = ccAlways THEN INC(res, 5)
 		ELSIF blk.jc # ccNever THEN INC(res, 6)
 		END
@@ -439,6 +441,18 @@ PROCEDURE SetRm_RIP(disp: INTEGER);
 BEGIN mem.rm := reg_BP; mem.disp := disp; mem.mod := 0
 END SetRm_RIP;
 
+PROCEDURE SetRm_regX(reg, idx, scl, disp: INTEGER);
+BEGIN
+	mem.rm := reg_SP; mem.disp := disp; ASSERT(idx # reg_SP);
+	mem.bas := reg; mem.idx := idx; mem.scl := scl;
+	IF (disp >= -128) & (disp <= 127) THEN
+		IF (disp = 0) & ~(reg IN {reg_BP, reg_R13})
+		THEN mem.mod := 0 ELSE mem.mod := 1
+		END
+	ELSE mem.mod := 2
+	END
+END SetRm_regX;
+
 PROCEDURE SetRmOperand(x: Item);
 BEGIN
 	IF x.mode = mSP THEN
@@ -479,6 +493,10 @@ END EmitRI;
 PROCEDURE EmitR(op, rm, rsize: INTEGER);
 BEGIN SetRm_reg(rm); EmitRm(op, rsize)
 END EmitR;
+
+PROCEDURE EmitXX(op, xreg, rsize, rm: INTEGER);
+BEGIN SetRm_reg(rm); EmitXmmRm(op, xreg, rsize)
+END EmitXX;
 
 (* -------------------------------------------------------------------------- *)
 
@@ -786,6 +804,9 @@ BEGIN
 	NewBlock(curProc.blk); trapProc := curProc;
 	
 	NEW(curProc.next); curProc := curProc.next;
+	NewBlock(curProc.blk); trapProc2 := curProc;
+	
+	NEW(curProc.next); curProc := curProc.next;
 	NewBlock(curProc.blk); NEWProc := curProc;
 	
 	NEW(curProc.next); curProc := curProc.next;
@@ -903,12 +924,12 @@ PROCEDURE Trap(cond, trapno: INTEGER);
 BEGIN
 	IF ~(cond IN {ccAlways, ccNever}) THEN
 		CloseBlock1(blk1, negated(cond));
-		MoveRI(reg_A, 1, trapno); MoveRI(reg_C, 4, sPos);
 		CloseBlock2(blk2, trapProc.blk);
+		blk2.jc := trapno; blk2.srcPos := sPos;
 		blk1.jDst := curBlk; FJump(blk1)
 	ELSIF cond = ccAlways THEN
-		MoveRI(reg_A, 1, trapno); MoveRI(reg_C, 4, sPos);
-		CloseBlock2(blk2, trapProc.blk)
+		CloseBlock2(blk2, trapProc.blk);
+		blk2.jc := trapno; blk2.srcPos := sPos
 	END
 END Trap;
 
@@ -916,10 +937,8 @@ PROCEDURE ModKeyTrap(cond: INTEGER; imod: B.Module);
 	VAR blk1, blk2: Block;
 BEGIN
 	CloseBlock1(blk1, negated(cond));
-	MoveRI(reg_A, 1, modkeyTrap);
 	SetRm_regI(reg_B, imod.adr); EmitRegRm(LEA, reg_C, 8);
-	CloseBlock2(blk2, trapProc.blk);
-	blk1.jDst := curBlk; FJump(blk1)
+	CloseBlock2(blk2, trapProc2.blk); blk1.jDst := curBlk; FJump(blk1)
 END ModKeyTrap;
 
 (* -------------------------------------------------------------------------- *)
@@ -1178,29 +1197,37 @@ BEGIN
 	ResetMkItmStat; MakeItem0(y, node.right); Load(y)
 END LoadLeftRight2;
 
+PROCEDURE LoadLeftRight3(VAR x, y: Item; node: B.Node);
+BEGIN
+	AvoidUsedBy(node.right); MakeItem0(x, node.left);
+	Load(x); ResetMkItmStat; MakeItem0(y, node.right);
+	IF y.mode = mImm THEN Load(y) ELSE RefToRegI(y) END
+END LoadLeftRight3;
+
 PROCEDURE Add(VAR x: Item; node: B.Node);
-	VAR y: Item;
-BEGIN LoadLeftRight(x, y, node);
-	IF node.type.form = B.tInt THEN EmitRR(ADDd, x.r, 8, y.r)
-	ELSIF node.type.form = B.tSet THEN EmitRR(ORd, x.r, 8, y.r)
-	ELSIF node.type = B.realType THEN SetRm_reg(y.r); EmitXmmRm(ADDSD, x.r, 4)
+	VAR y: Item; oldStat: MakeItemState; form: INTEGER;
+BEGIN form := node.type.form;
+	oldStat := MkItmStat; LoadLeftRight3(x, y, node); SetRmOperand(y);
+	IF form = B.tInt THEN EmitRegRm(ADDd, x.r, 8)
+	ELSIF form = B.tSet THEN EmitRegRm(ORd, x.r, 8)
+	ELSIF node.type = B.realType THEN EmitXmmRm(ADDSD, x.r, 4)
 	ELSE ASSERT(FALSE)
 	END;
-	FreeReg2(y)
+	FreeReg2(y); MkItmStat := oldStat
 END Add;
 
 PROCEDURE Subtract(VAR x: Item; node: B.Node);
-	VAR y: Item;
-BEGIN 
-	IF node.right # NIL THEN LoadLeftRight(x, y, node);
-		IF node.type.form = B.tInt THEN EmitRR(SUBd, x.r, 8, y.r)
-		ELSIF node.type.form = B.tSet THEN
-			EmitR(NOT, y.r, 8); EmitRR(ANDd, x.r, 8, y.r)
-		ELSIF node.type = B.realType THEN
-			SetRm_reg(y.r); EmitXmmRm(SUBSD, x.r, 4)
+	VAR y: Item; oldStat: MakeItemState; form: INTEGER;
+BEGIN form := node.type.form;
+	IF node.right # NIL THEN
+		oldStat := MkItmStat; LoadLeftRight3(x, y, node); SetRmOperand(y);
+		IF form = B.tInt THEN EmitRegRm(SUBd, x.r, 8)
+		ELSIF form = B.tSet THEN
+			Load(y); EmitR(NOT, y.r, 8); EmitRR(ANDd, x.r, 8, y.r)
+		ELSIF node.type = B.realType THEN EmitXmmRm(SUBSD, x.r, 4)
 		ELSE ASSERT(FALSE)
 		END;
-		FreeReg2(y)
+		FreeReg2(y); MkItmStat := oldStat
 	ELSE MakeItem0(x, node.left); Load(x);
 		IF node.type.form = B.tInt THEN EmitR(NEG, x.r, 8)
 		ELSIF node.type.form = B.tSet THEN EmitR(NOT, x.r, 8)
@@ -1307,14 +1334,15 @@ PROCEDURE Compare(VAR x: Item; node: B.Node);
 		y, len: Item; tp: B.Type; orgBlk, blk1, blk2, blk3: Block;		
 BEGIN ResetMkItmStat2(oldStat); tp := node.left.type;
 	IF tp.form IN B.typScalar - {B.tReal} THEN
-		LoadLeftRight2(x, y, node); EmitRR(CMPd, x.r, 8, y.r);
+		LoadLeftRight3(x, y, node); SetRmOperand(y);
+		EmitRegRm(CMPd, x.r, y.type.size);
 		IF x.type.form = B.tInt THEN cond := IntOpToCc(node.op)
 		ELSE cond := OpToCc(node.op)
 		END;
-		FreeReg(x.r); FreeReg(y.r); SetCond(x, cond)
+		FreeReg(x.r); FreeReg2(y); SetCond(x, cond)
 	ELSIF tp = B.realType THEN
-		LoadLeftRight2(x, y, node); SetRm_reg(y.r); EmitXmmRm(COMISD, x.r, 4);
-		FreeXReg(x.r); FreeXReg(y.r); SetCond(x, IntOpToCc(node.op))
+		LoadLeftRight3(x, y, node); SetRmOperand(y); EmitXmmRm(COMISD, x.r, 4);
+		FreeXReg(x.r); FreeReg2(y); SetCond(x, IntOpToCc(node.op))
 	ELSIF B.IsStr(tp) THEN
 		SetBestReg(reg_SI); AvoidUsedBy(node.right); SetAvoid(reg_DI);
 		MakeItem0(x, node.left); LoadAdr(x); ResetMkItmStat;
@@ -1422,12 +1450,14 @@ BEGIN
 		END;
 		Trap(ccAE, arrayTrap);
 		IF size > 0 THEN e := log2(size);
-			IF e > 0 THEN EmitRI(SHLi, y.r, 8, e)
-			ELSIF e < 0 THEN EmitRI(IMULi, y.r, 8, size)
-			END
-		ELSE EmitRR(XOR, y.r, 4, y.r)
+			IF (e >= 0) & (e <= 3) THEN
+				SetRm_regX(x.r, y.r, e, 0); EmitRegRm(LEA, x.r, 8)
+			ELSIF e > 3 THEN
+				EmitRI(SHLi, y.r, 8, e); EmitRR(ADDd, x.r, 8, y.r)
+			ELSE EmitRI(IMULi, y.r, 8, size); EmitRR(ADDd, x.r, 8, y.r)
+			END 
 		END;
-		EmitRR(ADDd, x.r, 8, y.r); FreeReg(y.r)
+		FreeReg(y.r)
 	END;
 	MkItmStat := oldStat
 END Index;
@@ -1811,8 +1841,8 @@ BEGIN ResetMkItmStat; allocReg := {}; allocXReg := {};
 	ELSIF id = S.spASSERT THEN
 		LoadCond(x, obj1); curBlk.link := x.bLink;
 		CloseBlock1(x.bLink, x.c); FixLink(x.aLink);
-		MoveRI(0, 1, assertTrap); MoveRI(1, 4, sPos);
-		CloseBlock2(blk1, trapProc.blk); FixLink(x.bLink)
+		CloseBlock2(blk1, trapProc.blk);
+		blk1.jc := assertTrap; FixLink(x.bLink)
 	ELSIF id = S.spPACK THEN
 		AvoidUsedBy(obj2); MakeItem0(x, obj1); RefToRegI(x); r := AllocReg();
 		SetRmOperand(x); EmitRegRm(MOVd, r, 8); ResetMkItmStat;
@@ -2227,19 +2257,35 @@ BEGIN
 END Procedure;
 
 PROCEDURE TrapHandler;
-	VAR procCodeSize: INTEGER; blk1, blk2: Block;
+	VAR blk, blk2: Block;
 BEGIN
 	trapProc.usedReg := {}; trapProc.usedXReg := {};
 	curBlk := trapProc.blk;
-
-	SetRm_reg(reg_A); EmitMOVZX(reg_R12, 1);
-	EmitRR(MOVd, reg_R13, 8, reg_C);
-	PopR(reg_A); EmitRI(SUBi, reg_SP, 8, 2064 + 64);
+	
+	PopR(reg_D); EmitRI(SUBi, reg_SP, 8, 2064 + 64);
+	
+	EmitRR(MOVd, reg_R12, 8, reg_D);
+	MoveRI(reg_C, 4, 6);
+	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_R8, 8);
+	SetRm_regI(reg_B, GetModuleHandleExW); EmitRm(CALL, 4);
+	
+	SetRm_regI(reg_SP, 64); EmitRegRm(MOVd, reg_SI, 8);
+	SetRm_regI(reg_SI, 400H-24); EmitRegRm(MOVd, reg_DI, 8);
+	EmitRR(ADDd, reg_DI, 8, reg_SI); EmitRR(SUBd, reg_R12, 8, reg_SI);
+	SetRm_regI(reg_SI, 400H-32); EmitRegRm(SUBd, reg_R12, 8);
+	
+	CloseBlock0; blk := curBlk; EmitRI(ADDi, reg_DI, 8, 8);
+	SetRm_regI(reg_DI, -8); EmitRegRm(MOVd, reg_C, 4);
+	EmitRI(ANDi, reg_C, 4, 40000000H-1); EmitRR(CMPd, reg_C, 8, reg_R12);
+	CloseBlock1(blk2, ccNZ); blk2.jDst := blk; BJump(blk2);
+	
+	SetRm_regI(reg_DI, -8); EmitRegRm(MOVd, reg_R12, 8);
+	EmitRI(SHRi, reg_R12, 8, 60);
+	SetRm_regI(reg_DI, -8); EmitRegRm(MOVd, reg_R13, 8);
+	EmitRI(SHRi, reg_R13, 8, 30); EmitRI(ANDi, reg_R13, 4, 40000000H-1);
 	
 	MoveRI(reg_A, 4, 00000000000A000DH);
 	SetRm_regI(reg_SP, 56); EmitRegRm(MOV, reg_A, 8);
-	
-	EmitRI(CMPi, reg_R12, 8, modkeyTrap); CloseBlock1(blk1, ccZ);
 	
 	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_C, 8);
 	SetRm_regI(reg_B, errFmtStr.adr); EmitRegRm(LEA, reg_D, 8);
@@ -2250,18 +2296,6 @@ BEGIN
 	SetRm_regI(reg_SP, 40); EmitRegRm(MOV, reg_R9, 8);
 	SetRm_regI(reg_SP, 48); EmitRegRm(MOV, reg_R13, 8);
 	SetRm_regI(reg_B, wsprintfW); EmitRm(CALL, 4);
-	
-	CloseBlock1(blk2, ccAlways); blk1.jDst := curBlk;
-	
-	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_C, 8);
-	SetRm_regI(reg_B, err2FmtStr.adr); EmitRegRm(LEA, reg_D, 8);
-	EmitRR(MOVd, reg_R8, 8, reg_R13);
-	SetRm_regI(reg_SP, 56); EmitRegRm(LEA, reg_R9, 8);
-	SetRm_regI(reg_B, modidStr.adr); EmitRegRm(LEA, reg_R10, 8);
-	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_R10, 8);
-	SetRm_regI(reg_B, wsprintfW); EmitRm(CALL, 4);
-	
-	CloseBlock0; blk2.jDst := curBlk; FJump(blk1); FJump(blk2);
 	
 	EmitRR(XOR, reg_C, 4, reg_C);
 	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_D, 8);
@@ -2274,6 +2308,37 @@ BEGIN
 	
 	MergeBlksOfProc
 END TrapHandler;
+
+PROCEDURE ModKeyTrapHandler;
+BEGIN
+	trapProc2.usedReg := {}; trapProc2.usedXReg := {};
+	curBlk := trapProc2.blk;
+
+	EmitRR(MOVd, reg_R13, 8, reg_C);
+	PopR(reg_A); EmitRI(SUBi, reg_SP, 8, 2064 + 64);
+	
+	MoveRI(reg_A, 4, 00000000000A000DH);
+	SetRm_regI(reg_SP, 56); EmitRegRm(MOV, reg_A, 8);
+
+	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_C, 8);
+	SetRm_regI(reg_B, err2FmtStr.adr); EmitRegRm(LEA, reg_D, 8);
+	EmitRR(MOVd, reg_R8, 8, reg_R13);
+	SetRm_regI(reg_SP, 56); EmitRegRm(LEA, reg_R9, 8);
+	SetRm_regI(reg_B, modidStr.adr); EmitRegRm(LEA, reg_R10, 8);
+	SetRm_regI(reg_SP, 32); EmitRegRm(MOV, reg_R10, 8);
+	SetRm_regI(reg_B, wsprintfW); EmitRm(CALL, 4);
+	
+	EmitRR(XOR, reg_C, 4, reg_C);
+	SetRm_regI(reg_SP, 64); EmitRegRm(LEA, reg_D, 8);
+	EmitRR(XOR, reg_R8, 4, reg_R8);
+	EmitRR(XOR, reg_R9, 4, reg_R9);
+	SetRm_regI(reg_B, MessageBoxW); EmitRm(CALL, 4);
+	
+	EmitRR(XOR, reg_C, 4, reg_C);
+	SetRm_regI(reg_B, ExitProcess); EmitRm(CALL, 4);
+	
+	MergeBlksOfProc
+END ModKeyTrapHandler;
 
 PROCEDURE ProcedureNEW;
 	VAR blk1: Block;
@@ -2465,7 +2530,9 @@ BEGIN
 END DLLInit;
 
 PROCEDURE MergeAllProcedure;
-	VAR proc: Proc; blk, src, dst: Block; off, n: INTEGER;
+	CONST limit = 40000000H;
+	VAR proc: Proc; blk, src, dst: Block; off: INTEGER;
+		totalCodeLen, x, p: INTEGER; r: Sys.MemFileRider;
 BEGIN proc := procList;
 	WHILE proc # NIL DO blk := proc.blk; blk.proc := proc;
 		WHILE blk.next # NIL DO
@@ -2476,7 +2543,8 @@ BEGIN proc := procList;
 		END;
 		proc := proc.next
 	END;
-	src := procList.blk;
+	Sys.NewMemFile(debugData); Sys.SetMemFile(r, debugData, 0);
+	src := procList.blk; totalCodeLen := 0;
 	WHILE src # NIL DO
 		IF ~src.finished THEN dst := src.jDst; off := 0;
 			IF ~src.call THEN ASSERT(src.load) END;
@@ -2486,13 +2554,20 @@ BEGIN proc := procList;
 				WHILE blk # src DO DEC(off, CodeLen1(blk)); blk := blk.next END
 			END;
 			IF off # 0 THEN curBlk := src;
-				IF src.call THEN CallNear(off)
+				IF src.call THEN CallNear(off);
+					IF src.jDst = trapProc.blk THEN
+						IF src.jc >= 16 THEN Sys.Console_WriteInt(src.jc) END;
+						ASSERT(src.jc < 16);
+						x := totalCodeLen + CodeLen(); ASSERT(x < limit);
+						p := src.srcPos; ASSERT(p < limit); INC(x, LSL(p, 30));
+						INC(x, LSL(src.jc, 60)); Sys.WriteMemFile8(r, x)
+					END
 				ELSE SetRm_RIP(off); EmitRegRm(LEA, src.jc, 8)
 				END
 			END;
 			src.finished := TRUE
 		END;
-		src := src.next
+		INC(totalCodeLen, CodeLen0(src)); src := src.next
 	END;
 	MergeFrom(procList.blk)
 END MergeAllProcedure;
@@ -2747,10 +2822,12 @@ BEGIN
 	Sys.WriteAnsiStr(out, 'KERNEL32.DLL');
 	
 	Sys.Seek(out, Linker.idata_fadr + hint_rva + 2);
-	Sys.WriteAnsiStr (out, 'ExitProcess');
+	Sys.WriteAnsiStr (out, 'GetModuleHandleExW');
 	Sys.Seek(out, Linker.idata_fadr + hint_rva + (32 + 2));
-	Sys.WriteAnsiStr(out, 'LoadLibraryW');
+	Sys.WriteAnsiStr (out, 'ExitProcess');
 	Sys.Seek(out, Linker.idata_fadr + hint_rva + (64 + 2));
+	Sys.WriteAnsiStr(out, 'LoadLibraryW');
+	Sys.Seek(out, Linker.idata_fadr + hint_rva + (96 + 2));
 	Sys.WriteAnsiStr(out, 'GetProcAddress');
 END Write_idata_section;
 
@@ -2897,7 +2974,8 @@ BEGIN
 	Sys.Write4(out, 4550H);
 	
 	Sys.Write2(out, 8664H); (* Machine = AMD64/Intel 64 *)
-	IF Linker.bss_size = 0 THEN nSection := 5 ELSE nSection := 6 END;
+	nSection := 5; IF Linker.bss_size > 0 THEN INC(nSection) END;
+	IF Linker.debug_size > 0 THEN INC(nSection) END;
 	Sys.Write2(out, nSection); (* NumberOfSections *)
 	Sys.SeekRel(out, 4 * 3);
 	Sys.Write2(out, 240);
@@ -2909,10 +2987,11 @@ BEGIN
 	
 	Sys.Write2(out, 20BH); (* Magic number for PE32+ *)
 	Sys.SeekRel(out, 2);
-	Sys.Write4(out, Linker.code_rawsize);
+	Sys.Write4(out, Linker.code_rawsize); (* SizeOfCode *)
 	k := Linker.data_rawsize + 200H * 2 + Linker.edata_rawsize;
-	Sys.Write4(out, k);
-	Sys.Write4(out, Linker.bss_size);
+	k := k + Linker.debug_rawsize;
+	Sys.Write4(out, k); (* SizeOfInitializedData *)
+	Sys.Write4(out, Linker.bss_size); (* SizeOfUninitializedData *)
 	Sys.Write4(out, Linker.code_rva + Linker.entry);
 	Sys.Write4(out, Linker.code_rva);
 	
@@ -2923,10 +3002,11 @@ BEGIN
 	Sys.SeekRel(out, 2 * 3);
 	Sys.Write2(out, 5);
 	Sys.SeekRel(out, 2 + 4);
-	k := 4096 + (4096 - Linker.code_size) MOD 4096 + Linker.code_size;
+	k := 4096 + (Linker.code_size + 4095) DIV 4096 * 4096;
+	k := k + (Linker.debug_size + 4095) DIV 4096 * 4096;
 	k := k + Linker.bss_size + Linker.data_size + 4096 + 4096;
-	k := k + (4096 - Linker.edata_size) MOD 4096 + Linker.edata_size;
-	Sys.Write4(out, k);
+	k := k + (Linker.edata_size + 4095) DIV 4096 * 4096;
+	Sys.Write4(out, k); (* SizeOfImage *)
 	Sys.Write4(out, 400H);
 	Sys.SeekRel(out, 4);
 	IF B.CplFlag.console THEN Sys.Write2(out, 3) (* Subsys = Console *)
@@ -2974,22 +3054,33 @@ BEGIN
 		'.reloc', 42000040H, Linker.reloc_rva, 200H,
 		12, Linker.reloc_fadr
 	);
+	IF Linker.debug_size > 0  THEN
+		Write_SectionHeader (
+			'debug', 40000040H, Linker.debug_rva, Linker.debug_rawsize,
+			Linker.debug_size, Linker.debug_fadr
+		)
+	END;
 	Write_SectionHeader (
 		'.edata', 40000040H, Linker.edata_rva, Linker.edata_rawsize,
 		Linker.edata_size, Linker.edata_fadr
-	);
+	)
 END Write_PEHeader;
 
 PROCEDURE Write_code_section;
 	VAR b: BYTE; rider: Sys.MemFileRider; blk: Block;
-BEGIN blk := procList.blk; Sys.SetMemFile(rider, blk.code, 0);
-	REPEAT Sys.ReadMemFile(rider, b);
-		IF ~rider.eof THEN Sys.Write1(out, b) END
-	UNTIL rider.eof; ASSERT(blk.next = NIL)
+BEGIN
+	Sys.Seek(out, 400H); blk := procList.blk;
+	Sys.MemFileToDisk(blk.code, out); ASSERT(blk.next = NIL)
 END Write_code_section;
 
+PROCEDURE Write_debug_section;
+BEGIN
+	Sys.Seek(out, Linker.debug_fadr);
+	Sys.MemFileToDisk(debugData, out)
+END Write_debug_section;
+
 PROCEDURE Generate*(modinit: B.Node);
-	VAR modkey: B.ModuleKey; n: INTEGER; str: B.String;
+	VAR n: INTEGER; str: B.String;
 BEGIN
 	(* Pass 1 *)
 	Pass1(modinit);
@@ -2999,6 +3090,7 @@ BEGIN
 	WHILE curProc # NIL DO
 		IF curProc = modInitProc THEN Procedure
 		ELSIF curProc = trapProc THEN TrapHandler
+		ELSIF curProc = trapProc2 THEN ModKeyTrapHandler
 		ELSIF curProc = dllInitProc THEN DLLInit
 		ELSIF curProc = NEWProc THEN ProcedureNEW
 		ELSE ASSERT(curProc.obj # NIL); Procedure
@@ -3008,20 +3100,20 @@ BEGIN
 	MergeAllProcedure;
 	
 	(* Linker *)
-	Sys.Seek(out, 400H - 16); modkey := B.modkey;
-	Sys.Write8(out, modkey[0]); Sys.Write8(out, modkey[1]);
-
 	IF B.CplFlag.main THEN Linker.imagebase := 400000H
 	ELSE Linker.imagebase := 10000000H
 	END;
 
-	Linker.code_rawsize := (512 - CodeLen()) MOD 512 + CodeLen();
 	Linker.code_size := CodeLen();
+	Linker.code_rawsize := (Linker.code_size + 511) DIV 512 * 512;
 	
 	Linker.data_size := staticSize; Align(Linker.data_size, 4096);
 	Linker.data_rawsize := Linker.data_size;
 	
 	Linker.bss_size := varSize; Align(Linker.bss_size, 4096);
+	
+	Linker.debug_size := Sys.MemFileLength(debugData);
+	Linker.debug_rawsize := (Linker.debug_size + 511) DIV 512 * 512;
 	
 	Linker.bss_rva := 1000H;
 	Linker.data_rva := Linker.bss_rva + Linker.bss_size;
@@ -3029,18 +3121,24 @@ BEGIN
 	n := Linker.code_size; Align(n, 4096);
 	Linker.idata_rva := Linker.code_rva + n;
 	Linker.reloc_rva := Linker.idata_rva + 4096;
-	Linker.edata_rva := Linker.reloc_rva + 4096;
+	Linker.debug_rva := Linker.reloc_rva + 4096;
+	n := Linker.debug_size; Align(n, 4096);
+	Linker.edata_rva := Linker.debug_rva + n;
 	
 	Linker.code_fadr := 400H;
 	Linker.idata_fadr := Linker.code_fadr + Linker.code_rawsize;
 	Linker.data_fadr := Linker.idata_fadr + 200H;
 	Linker.reloc_fadr := Linker.data_fadr + Linker.data_rawsize;
-	Linker.edata_fadr := Linker.reloc_fadr + 200H;
+	Linker.debug_fadr := Linker.reloc_fadr + 200H;
+	Linker.edata_fadr := Linker.debug_fadr + Linker.debug_rawsize;
+	
+	Sys.Seek(out, 400H - 32);
+	Sys.Write8(out, Linker.code_rva); Sys.Write8(out, Linker.debug_rva);
+	Sys.Write8(out, B.modkey[0]); Sys.Write8(out, B.modkey[1]);
 	
 	Write_idata_section; Write_data_section;
-	Write_reloc_section; Write_edata_section; Write_PEHeader;
-	Sys.Seek(out, 400H); Write_code_section;
-	Sys.Close(out);
+	Write_reloc_section; Write_debug_section; Write_edata_section;
+	Write_PEHeader; Write_code_section; Sys.Close(out);
 	
 	(* Rename files *)
 	str[0] := 0X; B.AppendStr(modid, str);
@@ -3077,9 +3175,10 @@ BEGIN
 	B.realType.size := 8; B.realType.align := 8;
 	B.nilType.size := 8; B.nilType.align := 8;
 	
-	adrOfNEW := -56;
-	wsprintfW := -48;
-	MessageBoxW := -40;
+	adrOfNEW := -64;
+	wsprintfW := -56;
+	MessageBoxW := -48;
+	GetModuleHandleExW := -40;
 	ExitProcess := -32;
 	LoadLibraryW := -24;
 	GetProcAddress := -16;
