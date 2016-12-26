@@ -57,3 +57,9 @@ User-defined NEW procedure must have the formal parameters as follow:
 `PROCEDURE (VAR ptr: INTEGER; tdAdr: INTEGER);`
 
 See PROCEDURE New in module BaseSys for example implementation. Type desc structure is same as in Project Oberon, with each word be 64-bit, instead of 32-bit, and the max level of extension is 7, instead of 3.
+
+### Debuging facility
+
+In the tradition of most Oberon compilers, the code outputted by this compiler is accompanied by runtime error checking guard. There is no way to remove runtime error checking, so if you want to bypass them, use SYSTEM module or external assembly module. In my opinion, running the code without runtime guard is similar to driving car without seatbelt.
+
+Additionally, there is SYSTEM.INT3 statement (yes, it is the x86 INT3 interrupt) in order to hook in your favourite assembly code debugger (in my case, Visual Studio). Sadly, there is no debugging information for external symbolic debugger. Not worth the effort and "debugger abusing is considered harmful" after all.
