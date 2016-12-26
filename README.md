@@ -58,8 +58,20 @@ User-defined NEW procedure must have the formal parameters as follow:
 
 See PROCEDURE New in module BaseSys for example implementation. Type desc structure is same as in Project Oberon, with each word be 64-bit, instead of 32-bit, and the max level of extension is 7, instead of 3.
 
-### Debuging facility
+### Debugging facility
 
 In the tradition of most Oberon compilers, the code outputted by this compiler is accompanied by runtime error checking guard. There is no way to remove runtime error checking, so if you want to bypass them, use SYSTEM module or external assembly module. In my opinion, running the code without runtime guard is similar to driving car without seatbelt.
 
 Additionally, there is SYSTEM.INT3 statement (yes, it is the x86 INT3 interrupt) in order to hook in your favourite assembly code debugger (in my case, Visual Studio). Sadly, there is no debugging information for external symbolic debugger. Not worth the effort and "debugger abusing is considered harmful" after all.
+
+The image below is an example of Oberon array index guard in action:
+
+![alt text](https://cloud.githubusercontent.com/assets/2053094/21479529/b58ede56-cb87-11e6-866d-3277be4c6361.png "Array guard")
+
+The source pos is the byte position in source code, if you are using Notepad++, you can quickly identify the offending error location by Ctrl+G and find by offset. Combines with Console Write, that is how I develop the compiler without symbolic debugger (and thanks to the powerful ASSERT statement too). If you had used GPCP or BlackBox, then this feature would be familiar.
+
+Another example of runtime guard, this time, is the ability to verify the interface of imported module:
+
+![alt text](https://cloud.githubusercontent.com/assets/2053094/21479512/a0594792-cb87-11e6-9a13-e05a1abf0004.png "Module guard")
+
+Arithmetic overflow is not checked, as same as in Project Oberon 2013.
