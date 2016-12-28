@@ -2,6 +2,7 @@ echo off
 cd lib
 echo on
 ..\bin\Poc Rtl.mod
+..\bin\Poc Out.mod
 echo off
 move /Y *.dll ..\source\
 move /Y *.sym ..\source\

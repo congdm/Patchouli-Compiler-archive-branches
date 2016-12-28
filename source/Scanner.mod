@@ -22,7 +22,7 @@
 MODULE Scanner; (* Modified from ORS module in Project Oberon *)
 
 IMPORT
-	SYSTEM, BaseSys;
+	SYSTEM, Rtl, Out;
   
 CONST
 	MaxIdLen* = 63; MaxStrLen* = 255;
@@ -75,7 +75,6 @@ VAR
 
     ch: CHAR; eof: BOOLEAN;
     errpos: INTEGER;
-    srcfile: BaseSys.File;
     k: INTEGER;
     KWX: ARRAY 11 OF INTEGER;
     keyTab: ARRAY NKW OF RECORD sym: INTEGER; id: IdStr END;
@@ -94,9 +93,8 @@ PROCEDURE Mark*(msg: ARRAY OF CHAR);
 BEGIN
 	(*p := Pos();*) p := lastPos;
 	IF (p > errpos) & (errcnt < 25) THEN
-		BaseSys.Console_WriteStr('file pos '); BaseSys.Console_WriteInt(p);
-		BaseSys.Console_WriteStr(': '); BaseSys.Console_WriteStr(msg);
-		BaseSys.Console_WriteLn; INC(errcnt);
+		Out.String('file pos '); Out.Int(p, 0);
+		Out.String(': '); Out.String(msg); Out.Ln; INC(errcnt)
 	END;
 	errpos := p + 4
 END Mark;
@@ -347,11 +345,11 @@ BEGIN
 	UNTIL (sym # null) OR eof
 END Get;
 
-PROCEDURE Init*(VAR file: BaseSys.File; pos: INTEGER);
+PROCEDURE Init*(f: Rtl.File; pos: INTEGER);
 BEGIN
 	errpos := pos; errcnt := 0;
-	srcfile := file; BaseSys.Seek(file, pos); filePos := pos; bufPos := 0;
-	BaseSys.ReadBytes(file, buffer, bufSize); Read
+	Rtl.Seek(f, pos); filePos := pos; bufPos := 0;
+	Rtl.ReadBytes(f, buffer, bufSize); Read
 END Init;
 
 PROCEDURE InstallSetCompilerFlag*(proc: SetCompilerFlagProc);

@@ -2,27 +2,78 @@ MODULE Rtl; (* multi-threaded application NOT SUPPORTED *)
 IMPORT SYSTEM;
 	
 CONST
+	MinInt = 8000000000000000H; MaxInt = 7FFFFFFFFFFFFFFFH;
+
 	Kernel32Path = 'KERNEL32.DLL';
 	heapErrMsg = 'Heap corruption';
+	
+	GENERIC_READ = {31}; GENERIC_WRITE = {30};
 	
 TYPE
 	Handle = INTEGER;
 	Pointer = INTEGER;
 	Bool = INTEGER;
 	Int = INTEGER;
+	Dword = INTEGER;
+	Uint = INTEGER;
+	
+	File* = RECORD hFile: INTEGER END;
 
 VAR
+	(* Utility *)
+	ExitProcess: PROCEDURE(uExitCode: INTEGER);
+	MessageBoxW: PROCEDURE(hWnd, lpText, lpCaption, uType: INTEGER): Int;
+	GetSystemTimeAsFileTime: PROCEDURE(lpSystemTimeAsFileTime: Pointer);
+	GetCommandLineW: PROCEDURE(): Pointer;
+
+	(* Heap *)
 	GetProcessHeap: PROCEDURE(): Handle;
 	HeapAlloc: PROCEDURE(hHeap, dwFlags, dwBytes: INTEGER): Pointer;
 	HeapFree: PROCEDURE(hHeap, dwFlags, lpMem: INTEGER): Bool;
 	HeapReAlloc: PROCEDURE(hHeap, dwFlags, lpMem, dwBytes: INTEGER): Pointer;
-	ExitProcess*: PROCEDURE(uExitCode: INTEGER);
-	
-	MessageBoxW: PROCEDURE(hWnd, lpText, lpCaption, uType: INTEGER): Int;
-	
 	heapBase, heapSize: INTEGER;
 	fList: ARRAY 9 OF INTEGER;
 	fList0: INTEGER;
+	
+	(* File *)
+	GetFileAttributesW: PROCEDURE(lpFileName: INTEGER): Dword;
+	MoveFileW: PROCEDURE(lpExistingFileName, lpNewFileName: INTEGER): Bool;
+	DeleteFileW: PROCEDURE(lpFilename: INTEGER): Bool;
+	CreateFileW: PROCEDURE(
+		lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+		dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile: INTEGER
+	): Handle;
+	CloseHandle: PROCEDURE(hObject: INTEGER): Bool;
+	ReadFile: PROCEDURE(
+		hFile, lpBuffer, nNumberOfBytesToRead,
+		lpNumberOfBytesRead, lpOverlapped: INTEGER
+	): Bool;
+	WriteFile: PROCEDURE(
+		hFile, lpBuffer, nNumberOfBytesToWrite,
+		lpNumberOfBytesWrite, lpOverlapped: INTEGER
+	): Bool;
+	SetFilePointerEx: PROCEDURE(
+		hFile, liDistanceToMove, lpNewFilePointer, dwMoveMethod: INTEGER
+	): Bool;
+	
+	(* Unicode *)
+	WideCharToMultiByte: PROCEDURE(
+		CodePage: Uint;
+		dwFlags: Dword;
+		lpWideCharStr: Pointer;
+		cchWideChar: Int;
+		lpMultiByteStr: Pointer;
+		cbMultiByte: Int;
+		lpDefaultChar, lpUsedDefaultChar: Pointer
+	): Int;
+	MultiByteToWideChar: PROCEDURE(
+		CodePage: Uint;
+		dwFlags: Dword;
+		lpMultiByteStr: Pointer;
+		cbMultiByte: Int;
+		lpWideCharStr: Pointer;
+		cchWideChar: Int
+	): Int;
 	
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -58,10 +109,71 @@ BEGIN
 	IF ~cond THEN Halt(msg) END
 END Assert;
 
-PROCEDURE FillByte*(ptr, count: INTEGER; val: BYTE);
+PROCEDURE Format*(
+	type: INTEGER; src: ARRAY OF BYTE; VAR dst: ARRAY OF CHAR
+): INTEGER;
+	CONST MinIntStr = '-9223372036854775808';
+	VAR neg: BOOLEAN; x, i, j, dstLen: INTEGER;
+		s: ARRAY 32 OF CHAR;
 BEGIN
-	WHILE count > 0 DO SYSTEM.PUT(ptr, val); INC(ptr); DEC(count) END
-END FillByte;
+	IF type = 0 (* Decimal Int *) THEN
+		IF LEN(src) = 8 THEN SYSTEM.GET(SYSTEM.ADR(src), x)
+		ELSIF LEN(src) = 1 THEN x := src[0] ELSE ASSERT(FALSE)
+		END;
+		IF x # MinInt THEN i := 0; j := 0;
+			IF x < 0 THEN neg := TRUE; x := -x ELSE neg := FALSE END;
+			REPEAT s[i] := CHR(x MOD 10 + ORD('0')); INC(i); x := x DIV 10
+			UNTIL x = 0;		
+			IF ~neg THEN
+				WHILE j < i DO dst[j] := s[i-1-j]; INC(j) END;
+				dst[j] := 0X; dstLen := j+1
+			ELSE dst[0] := '-';
+				WHILE j < i DO dst[j+1] := s[i-1-j]; INC(j) END;
+				dst[j+1] := 0X; dstLen := j+2
+			END
+		ELSE dst := MinIntStr; dstLen := LEN(MinIntStr)
+		END
+	ELSE ASSERT(FALSE)
+	END;
+	RETURN dstLen
+END Format;
+
+PROCEDURE Parse*(type: INTEGER; src: ARRAY OF CHAR; VAR dst: ARRAY OF BYTE);
+BEGIN ASSERT(FALSE)
+END Parse;
+
+PROCEDURE GetArg*(VAR out: ARRAY OF CHAR; VAR paramLen: INTEGER; n: INTEGER);
+	CONST chSize = 2;
+	VAR i, k: INTEGER; buf: Pointer; ch: CHAR;
+BEGIN buf := GetCommandLineW(); i := 0;
+	WHILE n > 0 DO
+		SYSTEM.GET(buf, ch);
+		WHILE (ch # ' ') & (ch # 0X) DO
+			buf := buf + chSize; SYSTEM.GET(buf, ch)
+		END;
+		IF ch = 0X THEN n := 0
+		ELSIF ch = ' ' THEN DEC(n);
+			WHILE ch = ' ' DO buf := buf + chSize; SYSTEM.GET(buf, ch) END
+		END
+	END;
+	k := 0; paramLen := 0;
+	WHILE (ch # ' ') & (ch # 0X) DO
+		IF k < LEN(out) THEN out[k] := ch END;
+		INC(k); INC(paramLen); buf := buf + chSize; SYSTEM.GET(buf, ch)
+	END;
+	IF k < LEN(out) THEN out[k] := 0X END
+END GetArg;
+
+PROCEDURE Time*(): INTEGER;
+	VAR tick: INTEGER;
+BEGIN
+	GetSystemTimeAsFileTime(SYSTEM.ADR(tick));
+	RETURN tick
+END Time;
+
+PROCEDURE TimeToMSecs*(time: INTEGER): INTEGER;
+	RETURN time DIV 10000
+END TimeToMSecs;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -188,6 +300,221 @@ END ReAlloc;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
+(* File *)
+
+PROCEDURE ExistFile*(fname: ARRAY OF CHAR): BOOLEAN;
+	CONST INVALID_FILE_ATTRIBUTES = {0..31};
+	VAR dwRes: INTEGER;
+BEGIN
+	dwRes := GetFileAttributesW(SYSTEM.ADR(fname));
+	RETURN dwRes # ORD(INVALID_FILE_ATTRIBUTES)
+END ExistFile;
+	
+PROCEDURE Open*(VAR f: File; fname: ARRAY OF CHAR);
+	CONST OPEN_EXISTING = 3;
+BEGIN
+	f.hFile := CreateFileW(
+		SYSTEM.ADR(fname), ORD(GENERIC_READ + GENERIC_WRITE),
+		0, 0, OPEN_EXISTING, 0, 0
+	)
+END Open;
+
+PROCEDURE Reset*(VAR f: File; fname: ARRAY OF CHAR);
+	CONST OPEN_EXISTING = 3;
+BEGIN
+	f.hFile := CreateFileW(
+		SYSTEM.ADR(fname), ORD(GENERIC_READ), 0, 0, OPEN_EXISTING, 0, 0
+	)
+END Reset;
+	
+PROCEDURE Rewrite*(VAR f: File; fname: ARRAY OF CHAR);
+	CONST CREATE_ALWAYS = 2;
+BEGIN
+	f.hFile := CreateFileW(
+		SYSTEM.ADR(fname), ORD(GENERIC_READ + GENERIC_WRITE),
+		0, 0, CREATE_ALWAYS, 0, 0
+	)
+END Rewrite;
+
+PROCEDURE Close*(VAR f: File);
+	VAR bRes: INTEGER;
+BEGIN bRes := CloseHandle(f.hFile); f.hFile := 0
+END Close;
+
+PROCEDURE Rename*(old, new: ARRAY OF CHAR);
+	VAR bRes: INTEGER;
+BEGIN bRes := MoveFileW(SYSTEM.ADR(old), SYSTEM.ADR(new))
+END Rename;
+
+PROCEDURE Delete*(fname: ARRAY OF CHAR);
+	VAR bRes: INTEGER;
+BEGIN bRes := DeleteFileW(SYSTEM.ADR(fname))
+END Delete;
+
+(* -------------------------------------------------------------------------- *)
+(* Read *)
+
+PROCEDURE Read1*(f: File; VAR n: INTEGER);
+	VAR bRes, byteRead: INTEGER; x: BYTE;
+BEGIN byteRead := 0;
+	bRes := ReadFile(f.hFile, SYSTEM.ADR(x), 1, SYSTEM.ADR(byteRead), 0);
+	IF (bRes # 0) & (byteRead = 1) THEN n := x ELSE n := -1 END
+END Read1;
+	
+PROCEDURE Read2*(f: File; VAR n: INTEGER);
+	VAR bRes, x, byteRead: INTEGER;
+BEGIN
+	bRes := ReadFile(f.hFile, SYSTEM.ADR(x), 2, SYSTEM.ADR(byteRead), 0);
+	IF (bRes # 0) & (byteRead = 2) THEN n := x MOD 10000H ELSE n := -1 END
+END Read2;
+
+PROCEDURE ReadStr*(f: File; VAR str: ARRAY OF CHAR);
+	VAR i: INTEGER; bRes, byteRead: INTEGER; ch: CHAR;
+BEGIN i := 0;
+	bRes := ReadFile(f.hFile, SYSTEM.ADR(ch), 2, SYSTEM.ADR(byteRead), 0);
+	WHILE (i < LEN(str)) & (ch # 0X) DO
+		str[i] := ch; INC(i);
+		bRes := ReadFile(f.hFile, SYSTEM.ADR(ch), 2, SYSTEM.ADR(byteRead), 0);
+		IF (bRes = 0) OR (byteRead # 2) THEN ch := 0X END
+	END;
+	IF i = LEN(str) THEN DEC(i) END; str[i] := 0X
+END ReadStr;
+	
+PROCEDURE Read4*(f: File; VAR n: INTEGER);
+	VAR bRes, x, byteRead: INTEGER;
+BEGIN
+	bRes := ReadFile(f.hFile, SYSTEM.ADR(x), 4, SYSTEM.ADR(byteRead), 0);
+	IF (bRes # 0) & (byteRead = 2) THEN n := x MOD 100000000H ELSE n := -1 END
+END Read4;
+	
+PROCEDURE Read8*(f: File; VAR n: INTEGER);
+	VAR bRes, x, byteRead: INTEGER;
+BEGIN
+	bRes := ReadFile(f.hFile, SYSTEM.ADR(x), 8, SYSTEM.ADR(byteRead), 0);
+	n := x
+END Read8;
+
+PROCEDURE ReadBytes*(f: File; VAR buf: ARRAY OF BYTE; VAR byteRead: INTEGER);
+	VAR bRes, dwByteRead: INTEGER;
+BEGIN dwByteRead := 0;
+	bRes := ReadFile(
+		f.hFile, SYSTEM.ADR(buf), LEN(buf), SYSTEM.ADR(dwByteRead), 0
+	);
+	byteRead := dwByteRead
+END ReadBytes;
+
+(* -------------------------------------------------------------------------- *)
+(* Write *)
+	
+PROCEDURE Write1*(f: File; n: INTEGER);
+	VAR bRes, byteWritten: INTEGER;
+BEGIN
+	bRes := WriteFile(f.hFile, SYSTEM.ADR(n), 1, SYSTEM.ADR(byteWritten), 0)
+END Write1;
+	
+PROCEDURE Write2*(f: File; n: INTEGER);
+	VAR bRes, byteWritten: INTEGER;
+BEGIN
+	bRes := WriteFile(f.hFile, SYSTEM.ADR(n), 2, SYSTEM.ADR(byteWritten), 0)
+END Write2;
+
+PROCEDURE WriteStr*(f: File; str: ARRAY OF CHAR);
+	VAR i, n: INTEGER;
+BEGIN i := -1; n := 0;
+	REPEAT INC(i); Write2(f, ORD(str[i])) UNTIL str[i] = 0X
+END WriteStr;
+
+PROCEDURE WriteAnsiStr*(f: File; str: ARRAY OF CHAR);
+	VAR i, n: INTEGER;
+BEGIN i := -1; n := 0;
+	REPEAT INC(i); Write1(f, ORD(str[i])) UNTIL str[i] = 0X
+END WriteAnsiStr;
+	
+PROCEDURE Write4*(f: File; n: INTEGER);
+	VAR bRes, byteWritten: INTEGER;
+BEGIN
+	bRes := WriteFile(f.hFile, SYSTEM.ADR(n), 4, SYSTEM.ADR(byteWritten), 0)
+END Write4;
+	
+PROCEDURE Write8*(f: File; n: INTEGER);
+	VAR bRes, byteWritten: INTEGER;
+BEGIN
+	bRes := WriteFile(f.hFile, SYSTEM.ADR(n), 8, SYSTEM.ADR(byteWritten), 0)
+END Write8;
+
+PROCEDURE WriteBytes*(f: File; a: ARRAY OF BYTE; VAR byteWritten: INTEGER);
+	VAR bRes, dwByteWritten: INTEGER;
+BEGIN dwByteWritten := 0;
+	bRes := WriteFile(
+		f.hFile, SYSTEM.ADR(a), LEN(a), SYSTEM.ADR(dwByteWritten), 0
+	);
+	byteWritten := dwByteWritten
+END WriteBytes;
+
+PROCEDURE WriteBuf*(f: File; ptr: INTEGER; VAR byteWritten: INTEGER);
+	VAR bRes, dwByteWritten: INTEGER;
+BEGIN dwByteWritten := 0;
+	bRes := WriteFile(
+		f.hFile, ptr, byteWritten, SYSTEM.ADR(dwByteWritten), 0
+	);
+	byteWritten := dwByteWritten
+END WriteBuf;
+
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE Pos*(f: File): INTEGER;
+	CONST FILE_CURRENT = 1;
+	VAR bRes, byteToMove, newPointer: INTEGER;
+BEGIN byteToMove := 0;
+	bRes := SetFilePointerEx(
+		f.hFile, byteToMove, SYSTEM.ADR(newPointer), FILE_CURRENT
+	)
+	RETURN newPointer
+END Pos;
+
+PROCEDURE Seek*(f: File; pos: INTEGER);
+	CONST FILE_BEGIN = 0;
+	VAR bRes, byteToMove, newPointer: INTEGER;
+BEGIN byteToMove := pos;
+	bRes := SetFilePointerEx(
+		f.hFile, byteToMove, SYSTEM.ADR(newPointer), FILE_BEGIN
+	)
+END Seek;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+(* Unicode *)
+
+PROCEDURE Utf8ToUnicode*(src: ARRAY OF BYTE; VAR dst: ARRAY OF CHAR): INTEGER;
+	CONST CP_UTF8 = 65001;
+	VAR iRes: INTEGER;
+BEGIN iRes := 0;
+	iRes := MultiByteToWideChar(
+		CP_UTF8, 0, SYSTEM.ADR(src), -1, SYSTEM.ADR(dst), LEN(dst)
+	);
+	ASSERT(iRes > 0);
+	RETURN iRes
+END Utf8ToUnicode;
+
+PROCEDURE UnicodeToUtf8*(src: ARRAY OF CHAR; VAR dst: ARRAY OF BYTE): INTEGER;
+	CONST CP_UTF8 = 65001;
+	VAR iRes: INTEGER;
+BEGIN iRes := 0;
+	iRes := WideCharToMultiByte(
+		CP_UTF8, 0, SYSTEM.ADR(src), -1, SYSTEM.ADR(dst), LEN(dst), 0, 0
+	);
+	ASSERT(iRes > 0);
+	RETURN iRes
+END UnicodeToUtf8;
+
+PROCEDURE SizeInUtf8*(str: ARRAY OF CHAR): INTEGER;
+	CONST CP_UTF8 = 65001;
+	RETURN WideCharToMultiByte(CP_UTF8, 0, SYSTEM.ADR(str), -1, 0, 0, 0, 0)
+END SizeInUtf8;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+(* Init *)
 
 PROCEDURE InitHeap;
 	VAR i: INTEGER;
@@ -199,12 +526,27 @@ BEGIN heapSize := 800000H;
 END InitHeap;
 
 BEGIN
+	ImportExtProc(ExitProcess, Kernel32Path, 'ExitProcess');
+	ImportExtProc(MessageBoxW, 'USER32.DLL', 'MessageBoxW');
+	ImportExtProc(GetSystemTimeAsFileTime, Kernel32Path, 'GetSystemTimeAsFileTime');
+	ImportExtProc(GetCommandLineW, Kernel32Path, 'GetCommandLineW');
+
 	ImportExtProc(GetProcessHeap, Kernel32Path, 'GetProcessHeap');
 	ImportExtProc(HeapAlloc, Kernel32Path, 'HeapAlloc');
 	ImportExtProc(HeapFree, Kernel32Path, 'HeapFree');
 	ImportExtProc(HeapReAlloc, Kernel32Path, 'HeapReAlloc');
-	ImportExtProc(ExitProcess, Kernel32Path, 'ExitProcess');
-	ImportExtProc(MessageBoxW, 'USER32.DLL', 'MessageBoxW');
+	
+	ImportExtProc(GetFileAttributesW, Kernel32Path, 'GetFileAttributesW');
+	ImportExtProc(CreateFileW, Kernel32Path, 'CreateFileW');
+	ImportExtProc(CloseHandle, Kernel32Path, 'CloseHandle');
+	ImportExtProc(MoveFileW, Kernel32Path, 'MoveFileW');
+	ImportExtProc(DeleteFileW, Kernel32Path, 'DeleteFileW');
+	ImportExtProc(ReadFile, Kernel32Path, 'ReadFile');
+	ImportExtProc(WriteFile, Kernel32Path, 'WriteFile');
+	ImportExtProc(SetFilePointerEx, Kernel32Path, 'SetFilePointerEx');
+	
+	ImportExtProc(WideCharToMultiByte, Kernel32Path, 'WideCharToMultiByte');
+	ImportExtProc(MultiByteToWideChar, Kernel32Path, 'MultiByteToWideChar');
 	
 	InitHeap
 END Rtl.

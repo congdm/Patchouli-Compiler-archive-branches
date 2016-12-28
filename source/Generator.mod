@@ -2,7 +2,7 @@ MODULE Generator;
 (*$NEW Rtl.New*)
 
 IMPORT
-	SYSTEM, Rtl, Sys := BaseSys,
+	SYSTEM, Rtl, Out, Sys := BaseSys,
 	S := Scanner, B := Base;
 
 CONST
@@ -122,7 +122,6 @@ VAR
 	allocReg, allocXReg: SET;
 	MkItmStat: MakeItemState; (* State for MakeItem procedures in Pass 2 *)
 	
-	
 	(* Static data address*)
 	(* Win32 specifics *)
 	GetModuleHandleExW, ExitProcess, LoadLibraryW, GetProcAddress: INTEGER;
@@ -138,10 +137,12 @@ VAR
 		code_rva, data_rva, idata_rva, reloc_rva, edata_rva: INTEGER;
 		code_fadr, data_fadr, idata_fadr, reloc_fadr, edata_fadr: INTEGER;
 		debug_rawsize, debug_size, debug_rva, debug_fadr: INTEGER;
-		bss_size, bss_rva, startTime, endTime: INTEGER;
+		bss_size, bss_rva: INTEGER;
 		Kernel32Table: ARRAY 5 OF INTEGER
 	END;
-	out: Sys.File;
+	
+	out: Rtl.File;
+	startTime, endTime: INTEGER;
 		
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
@@ -1987,7 +1988,7 @@ BEGIN imm := node.right(B.Const).val;
 		MakeItem0(x, node.left); Load(x); SetRm_regI(x.r, 0);
 		EmitRmImm(MOVi, node.right.type.size, imm);
 		ResetMkItmStat; allocReg := {}; allocXReg := {}
-	ELSE Sys.Console_WriteInt(sPos); ASSERT(FALSE)
+	ELSE ASSERT(FALSE)
 	END
 END OpImm;
 
@@ -2051,7 +2052,7 @@ BEGIN
 		ELSIF node.op = S.repeat THEN Repeat(node)
 		ELSIF node.op = S.for THEN For(node)
 		ELSIF node.op = S.case THEN
-			Sys.Console_WriteStr('CASE not supported yet'); ASSERT(FALSE)
+			Out.String('CASE not supported yet'); ASSERT(FALSE)
 		ELSIF node.op = S.semicolon THEN
 			IF node.left # NIL THEN MakeItem(x, node.left) END;
 			IF node.right # NIL THEN MakeItem(x, node.right) END
@@ -2069,25 +2070,25 @@ BEGIN
 END MakeItem;
 
 PROCEDURE Debug(endBlk: Block);
-	VAR file: Sys.File; b: BYTE; rider: Sys.MemFileRider; blk: Block;
+	VAR file: Rtl.File; b: BYTE; rider: Sys.MemFileRider; blk: Block;
 		i: INTEGER;
 BEGIN
-	Sys.Rewrite(file, 'Test.dat');
+	Rtl.Rewrite(file, 'Test.dat');
 	blk := curProc.blk;
 	WHILE blk # endBlk DO
 		Sys.SetMemFile(rider, blk.code, 0);
 		REPEAT Sys.ReadMemFile(rider, b);
-			IF ~rider.eof THEN Sys.Write1(file, b) END
+			IF ~rider.eof THEN Rtl.Write1(file, b) END
 		UNTIL rider.eof;
 		IF ~blk.finished THEN i := 0;
 			IF blk.call THEN
-				WHILE i < 5 DO Sys.Write1(file, 90H); INC(i) END
-			ELSE WHILE i < 7 DO Sys.Write1(file, 90H); INC(i) END
+				WHILE i < 5 DO Rtl.Write1(file, 90H); INC(i) END
+			ELSE WHILE i < 7 DO Rtl.Write1(file, 90H); INC(i) END
 			END
 		END;
 		blk := blk.next
 	END;
-	Sys.Close(file)
+	Rtl.Close(file)
 END Debug;
 
 PROCEDURE SetPtrToNil(adr: INTEGER; type: B.Type);
@@ -2560,9 +2561,7 @@ BEGIN proc := procList;
 			END;
 			IF off # 0 THEN curBlk := src;
 				IF src.call THEN CallNear(off);
-					IF src.jDst = trapProc.blk THEN
-						IF src.jc >= 16 THEN Sys.Console_WriteInt(src.jc) END;
-						ASSERT(src.jc < 16);
+					IF src.jDst = trapProc.blk THEN ASSERT(src.jc < 16);
 						x := totalCodeLen + CodeLen(); ASSERT(x < limit);
 						p := src.srcPos; ASSERT(p < limit); INC(x, LSL(p, 30));
 						INC(x, LSL(src.jc, 60)); Sys.WriteMemFile8(r, x)
@@ -2806,34 +2805,34 @@ PROCEDURE Write_idata_section;
 		name_rva = table_rva + table_size; hint_rva = name_rva + 16;
 	VAR i: INTEGER;
 BEGIN
-	Sys.Seek(out, Linker.idata_fadr);
+	Rtl.Seek(out, Linker.idata_fadr);
 	
 	(* Import Directory Entry - Kernel32.dll *)
-	Sys.Write4(out, Linker.idata_rva + table_rva);
-	Sys.Write4(out, 0);
-	Sys.Write4(out, 0);
-	Sys.Write4(out, Linker.idata_rva + name_rva);
+	Rtl.Write4(out, Linker.idata_rva + table_rva);
+	Rtl.Write4(out, 0);
+	Rtl.Write4(out, 0);
+	Rtl.Write4(out, Linker.idata_rva + name_rva);
 	i := Linker.data_rva + Linker.data_size - table_size;
-	Sys.Write4(out, i);
+	Rtl.Write4(out, i);
 
-	Sys.Seek(out, Linker.idata_fadr + table_rva); i := 0;
+	Rtl.Seek(out, Linker.idata_fadr + table_rva); i := 0;
 	WHILE i <= table_len - 2 DO
 		Linker.Kernel32Table[i] := Linker.idata_rva + hint_rva + 32 * i;
-		Sys.Write8(out, Linker.Kernel32Table[i]); INC(i)
+		Rtl.Write8(out, Linker.Kernel32Table[i]); INC(i)
 	END;
 	Linker.Kernel32Table[table_len - 1] := 0;
 	
-	Sys.Seek(out, Linker.idata_fadr + name_rva);
-	Sys.WriteAnsiStr(out, 'KERNEL32.DLL');
+	Rtl.Seek(out, Linker.idata_fadr + name_rva);
+	Rtl.WriteAnsiStr(out, 'KERNEL32.DLL');
 	
-	Sys.Seek(out, Linker.idata_fadr + hint_rva + 2);
-	Sys.WriteAnsiStr (out, 'GetModuleHandleExW');
-	Sys.Seek(out, Linker.idata_fadr + hint_rva + (32 + 2));
-	Sys.WriteAnsiStr (out, 'ExitProcess');
-	Sys.Seek(out, Linker.idata_fadr + hint_rva + (64 + 2));
-	Sys.WriteAnsiStr(out, 'LoadLibraryW');
-	Sys.Seek(out, Linker.idata_fadr + hint_rva + (96 + 2));
-	Sys.WriteAnsiStr(out, 'GetProcAddress');
+	Rtl.Seek(out, Linker.idata_fadr + hint_rva + 2);
+	Rtl.WriteAnsiStr (out, 'GetModuleHandleExW');
+	Rtl.Seek(out, Linker.idata_fadr + hint_rva + (32 + 2));
+	Rtl.WriteAnsiStr (out, 'ExitProcess');
+	Rtl.Seek(out, Linker.idata_fadr + hint_rva + (64 + 2));
+	Rtl.WriteAnsiStr(out, 'LoadLibraryW');
+	Rtl.Seek(out, Linker.idata_fadr + hint_rva + (96 + 2));
+	Rtl.WriteAnsiStr(out, 'GetProcAddress');
 END Write_idata_section;
 
 PROCEDURE Write_pointer_offset(offset: INTEGER; type: B.Type);
@@ -2845,7 +2844,7 @@ BEGIN ptrcnt := type.nptr;
 		END;
 		WHILE ident # NIL DO field := ident.obj(B.Field);
 			IF field.type.nptr > 0 THEN n := offset + field.off;
-				IF field.type.form = B.tPtr THEN Sys.Write8(out, n)
+				IF field.type.form = B.tPtr THEN Rtl.Write8(out, n)
 				ELSE Write_pointer_offset(n, field.type)
 				END
 			END;
@@ -2853,7 +2852,7 @@ BEGIN ptrcnt := type.nptr;
 		END
 	ELSIF type.form = B.tArray THEN type := type.base;
 		IF type.form = B.tPtr THEN n := offset;
-			REPEAT Sys.Write8(out, n); DEC(ptrcnt); INC(n, 8)
+			REPEAT Rtl.Write8(out, n); DEC(ptrcnt); INC(n, 8)
 			UNTIL ptrcnt <= 0; ASSERT(ptrcnt = 0)
 		ELSE k := type.nptr; size := type.size;
 			REPEAT
@@ -2870,32 +2869,32 @@ PROCEDURE Write_data_section;
 		imod: B.Module; ident: B.Ident; x: B.Str; t: B.TypeList;
 BEGIN
 	basefadr := Linker.data_fadr + Linker.data_size;
-	Sys.Seek(out, basefadr - LEN(Linker.Kernel32Table)*8); i := 0;
+	Rtl.Seek(out, basefadr - LEN(Linker.Kernel32Table)*8); i := 0;
 	WHILE i < LEN(Linker.Kernel32Table) DO
-		Sys.Write8(out, Linker.Kernel32Table[i]); INC(i)
+		Rtl.Write8(out, Linker.Kernel32Table[i]); INC(i)
 	END; i := 0;
 	WHILE i < B.modno DO imod := B.modList[i];
-		Sys.Seek(out, basefadr + imod.adr); j := 0;
+		Rtl.Seek(out, basefadr + imod.adr); j := 0;
 		WHILE imod.name[j] # 0X DO
-			Sys.Write2(out, ORD(imod.name[j])); INC(j)
+			Rtl.Write2(out, ORD(imod.name[j])); INC(j)
 		END;
-		Sys.WriteStr(out, '.dll'); INC(i)	
+		Rtl.WriteStr(out, '.dll'); INC(i)	
 	END;
-	Sys.Seek(out, basefadr + adrOfNEW); Sys.Write8(out, 0);
+	Rtl.Seek(out, basefadr + adrOfNEW); Rtl.Write8(out, 0);
 	ident := B.strList;
 	WHILE ident # NIL DO x := ident.obj(B.Str);
-		Sys.Seek(out, basefadr + x.adr); i := 0;
+		Rtl.Seek(out, basefadr + x.adr); i := 0;
 		WHILE i < x.len DO
-			Sys.Write2(out, ORD(B.strbuf[x.bufpos+i])); INC(i)
+			Rtl.Write2(out, ORD(B.strbuf[x.bufpos+i])); INC(i)
 		END;
 		ident := ident.next
 	END;
 	t := B.recList;
 	WHILE t # NIL DO
-		Sys.Seek(out, basefadr + t.type.adr); Sys.Write8(out, t.type.size);
-		Sys.Seek(out, basefadr + t.type.adr + 8 + B.MaxExt*8);
+		Rtl.Seek(out, basefadr + t.type.adr); Rtl.Write8(out, t.type.size);
+		Rtl.Seek(out, basefadr + t.type.adr + 8 + B.MaxExt*8);
 		IF t.type.nptr > 0 THEN Write_pointer_offset(0, t.type) END;
-		Sys.Write8(out, -1); t := t.next
+		Rtl.Write8(out, -1); t := t.next
 	END
 END Write_data_section;
 
@@ -2911,42 +2910,42 @@ BEGIN name[0] := 0X; B.AppendStr(modid, name); namesize := 0;
 	expno := B.expno; tablesize := expno * 4;
 
 	(* Export directory *)
-	Sys.Seek(out, Linker.edata_fadr + 12);
-	Sys.Write4(out, Linker.edata_rva + dirsize + tablesize);
-	Sys.Write4(out, 1);
-	Sys.Write4(out, expno);
-	Sys.Write4(out, 0);
-	Sys.Write4(out, Linker.edata_rva + dirsize);
+	Rtl.Seek(out, Linker.edata_fadr + 12);
+	Rtl.Write4(out, Linker.edata_rva + dirsize + tablesize);
+	Rtl.Write4(out, 1);
+	Rtl.Write4(out, expno);
+	Rtl.Write4(out, 0);
+	Rtl.Write4(out, Linker.edata_rva + dirsize);
 	
 	(* Export address table *)
-	Sys.Seek(out, Linker.edata_fadr + dirsize); ident := B.expList;
+	Rtl.Seek(out, Linker.edata_fadr + dirsize); ident := B.expList;
 	WHILE ident # NIL DO x := ident.obj;
 		IF x.class = B.cType THEN rva := x.type.adr
 		ELSIF x IS B.Var THEN rva := x(B.Var).adr
 		ELSIF x IS B.Proc THEN rva := x(B.Proc).adr
 		END; INC(rva, Linker.code_rva);
-		Sys.Write4(out, rva); ident := ident.next
+		Rtl.Write4(out, rva); ident := ident.next
 	END;
 		
 	(* Name string *)
-	Sys.WriteAnsiStr(out, name);
+	Rtl.WriteAnsiStr(out, name);
 	
 	Linker.edata_size := dirsize + tablesize + namesize;
 	Linker.edata_rawsize := Linker.edata_size;
 	IF Linker.edata_rawsize MOD 512 # 0 THEN
 		Align(Linker.edata_rawsize, 512);
-		Sys.Seek(out, Linker.edata_fadr + Linker.edata_rawsize - 1);
-		Sys.Write1(out, 1)
+		Rtl.Seek(out, Linker.edata_fadr + Linker.edata_rawsize - 1);
+		Rtl.Write1(out, 1)
 	END
 END Write_edata_section;
 
 PROCEDURE Write_reloc_section;
 BEGIN
-	Sys.Seek(out, Linker.reloc_fadr);
-	Sys.Write4(out, 4);
-	Sys.Write4(out, 12);
-	Sys.Write2(out, 0);
-	Sys.Write2(out, 0)
+	Rtl.Seek(out, Linker.reloc_fadr);
+	Rtl.Write4(out, 4);
+	Rtl.Write4(out, 12);
+	Rtl.Write2(out, 0);
+	Rtl.Write2(out, 0)
 END Write_reloc_section;
 
 PROCEDURE Write_SectionHeader (
@@ -2956,87 +2955,95 @@ PROCEDURE Write_SectionHeader (
 BEGIN i := 0;
 	WHILE i < 8 DO b := 0;
 		IF i < LEN(name) THEN b := ORD(name[i]) END;
-		Sys.Write1(out, b); INC(i)
+		Rtl.Write1(out, b); INC(i)
 	END;
-	Sys.Write4(out, size);
-	Sys.Write4(out, rva);
-	Sys.Write4(out, rawsize);
-	Sys.Write4(out, fileadr);
-	Sys.Write4(out, 0);
-	Sys.Write4(out, 0);
-	Sys.Write4(out, 0);
-	Sys.Write4(out, chr)
+	Rtl.Write4(out, size);
+	Rtl.Write4(out, rva);
+	Rtl.Write4(out, rawsize);
+	Rtl.Write4(out, fileadr);
+	Rtl.Write4(out, 0);
+	Rtl.Write4(out, 0);
+	Rtl.Write4(out, 0);
+	Rtl.Write4(out, chr)
 END Write_SectionHeader;
 
 PROCEDURE Write_PEHeader;
 	VAR k, nSection: INTEGER;
 BEGIN
-	Sys.Seek(out, 0);
-	Sys.Write2(out, 5A4DH);
-	Sys.Seek(out, 60);
-	Sys.Write4(out, 128);
-	Sys.Seek (out, 128);
-	Sys.Write4(out, 4550H);
+	Rtl.Seek(out, 0);
+	Rtl.Write2(out, 5A4DH);
+	Rtl.Seek(out, 60);
+	Rtl.Write4(out, 128);
+	Rtl.Seek (out, 128);
+	Rtl.Write4(out, 4550H);
 	
-	Sys.Write2(out, 8664H); (* Machine = AMD64/Intel 64 *)
+	Rtl.Write2(out, 8664H); (* Machine = AMD64/Intel 64 *)
 	nSection := 5; IF Linker.bss_size > 0 THEN INC(nSection) END;
 	IF Linker.debug_size > 0 THEN INC(nSection) END;
-	Sys.Write2(out, nSection); (* NumberOfSections *)
-	Sys.SeekRel(out, 4 * 3);
-	Sys.Write2(out, 240);
+	Rtl.Write2(out, nSection); (* NumberOfSections *)
+	Rtl.Write4(out, 0);
+	Rtl.Write4(out, 0);
+	Rtl.Write4(out, 0);
+	Rtl.Write2(out, 240);
 	
 	(* Characteristics *)
-	IF B.CplFlag.main THEN Sys.Write2(out, 20H + 2 + 1)
-	ELSE Sys.Write2(out, 2000H + 20H + 2)
+	IF B.CplFlag.main THEN Rtl.Write2(out, 20H + 2 + 1)
+	ELSE Rtl.Write2(out, 2000H + 20H + 2)
 	END;
 	
-	Sys.Write2(out, 20BH); (* Magic number for PE32+ *)
-	Sys.SeekRel(out, 2);
-	Sys.Write4(out, Linker.code_rawsize); (* SizeOfCode *)
+	Rtl.Write2(out, 20BH); (* Magic number for PE32+ *)
+	Rtl.Write2(out, 0);
+	Rtl.Write4(out, Linker.code_rawsize); (* SizeOfCode *)
 	k := Linker.data_rawsize + 200H * 2 + Linker.edata_rawsize;
 	k := k + Linker.debug_rawsize;
-	Sys.Write4(out, k); (* SizeOfInitializedData *)
-	Sys.Write4(out, Linker.bss_size); (* SizeOfUninitializedData *)
-	Sys.Write4(out, Linker.code_rva + Linker.entry);
-	Sys.Write4(out, Linker.code_rva);
+	Rtl.Write4(out, k); (* SizeOfInitializedData *)
+	Rtl.Write4(out, Linker.bss_size); (* SizeOfUninitializedData *)
+	Rtl.Write4(out, Linker.code_rva + Linker.entry);
+	Rtl.Write4(out, Linker.code_rva);
 	
-	Sys.Write8(out, Linker.imagebase);
-	Sys.Write4(out, 4096);
-	Sys.Write4(out, 512);
-	Sys.Write2(out, 5); (* MajorOSVer *)
-	Sys.SeekRel(out, 2 * 3);
-	Sys.Write2(out, 5);
-	Sys.SeekRel(out, 2 + 4);
+	Rtl.Write8(out, Linker.imagebase);
+	Rtl.Write4(out, 4096);
+	Rtl.Write4(out, 512);
+	Rtl.Write2(out, 5); (* MajorOSVer *)
+	Rtl.Write2(out, 0);
+	Rtl.Write2(out, 0);
+	Rtl.Write2(out, 0);
+	Rtl.Write2(out, 5);
+	Rtl.Write2(out, 0);
+	Rtl.Write4(out, 0);
 	k := 4096 + (Linker.code_size + 4095) DIV 4096 * 4096;
 	k := k + (Linker.debug_size + 4095) DIV 4096 * 4096;
 	k := k + Linker.bss_size + Linker.data_size + 4096 + 4096;
 	k := k + (Linker.edata_size + 4095) DIV 4096 * 4096;
-	Sys.Write4(out, k); (* SizeOfImage *)
-	Sys.Write4(out, 400H);
-	Sys.SeekRel(out, 4);
-	IF B.CplFlag.console THEN Sys.Write2(out, 3) (* Subsys = Console *)
-	ELSE Sys.Write2(out, 2) (* Subsys = GUI *)
+	Rtl.Write4(out, k); (* SizeOfImage *)
+	Rtl.Write4(out, 400H);
+	Rtl.Write4(out, 0);
+	IF B.CplFlag.console THEN Rtl.Write2(out, 3) (* Subsys = Console *)
+	ELSE Rtl.Write2(out, 2) (* Subsys = GUI *)
 	END;
 	
 	(* DLL Characteristics *)
-	IF B.CplFlag.main THEN Sys.Write2(out, 0)
-	ELSE Sys.Write2(out, 100H + 40H)
+	IF B.CplFlag.main THEN Rtl.Write2(out, 0)
+	ELSE Rtl.Write2(out, 100H + 40H)
 	END;
 	
-	Sys.Write8(out, 1000H); (* Size of stack reserve *)
-	Sys.Write8(out, 1000H); (* Size of stack commit *)
-	Sys.Write8(out, 10000H); (* Size of heap reserve *)
-	Sys.SeekRel(out, 8 + 4);
-	Sys.Write4(out, 16);
+	Rtl.Write8(out, 1000H); (* Size of stack reserve *)
+	Rtl.Write8(out, 1000H); (* Size of stack commit *)
+	Rtl.Write8(out, 10000H); (* Size of heap reserve *)
+	Rtl.Write8(out, 0);
+	Rtl.Write4(out, 4);
+	Rtl.Write4(out, 16);
 	
-	Sys.Write4(out, Linker.edata_rva);
-	Sys.Write4(out, Linker.edata_size);
-	Sys.Write4(out, Linker.idata_rva);
-	Sys.Write4(out, 130H);
-	Sys.SeekRel(out, 8 * 3);
-	Sys.Write4(out, Linker.reloc_rva);
-	Sys.Write4(out, 12);
-	Sys.SeekRel(out, 8 * 10);
+	Rtl.Write4(out, Linker.edata_rva);
+	Rtl.Write4(out, Linker.edata_size);
+	Rtl.Write4(out, Linker.idata_rva);
+	Rtl.Write4(out, 130H);
+	Rtl.Write8(out, 0);
+	Rtl.Write8(out, 0);
+	Rtl.Write8(out, 0);
+	Rtl.Write4(out, Linker.reloc_rva);
+	Rtl.Write4(out, 12);
+	Rtl.Seek(out, Rtl.Pos(out) + 8 * 10);
 	
 	IF Linker.bss_size > 0 THEN
 		Write_SectionHeader(
@@ -3074,13 +3081,13 @@ END Write_PEHeader;
 PROCEDURE Write_code_section;
 	VAR b: BYTE; rider: Sys.MemFileRider; blk: Block;
 BEGIN
-	Sys.Seek(out, 400H); blk := procList.blk;
+	Rtl.Seek(out, 400H); blk := procList.blk;
 	Sys.MemFileToDisk(blk.code, out); ASSERT(blk.next = NIL)
 END Write_code_section;
 
 PROCEDURE Write_debug_section;
 BEGIN
-	Sys.Seek(out, Linker.debug_fadr);
+	Rtl.Seek(out, Linker.debug_fadr);
 	Sys.MemFileToDisk(debugData, out)
 END Write_debug_section;
 
@@ -3137,35 +3144,30 @@ BEGIN
 	Linker.debug_fadr := Linker.reloc_fadr + 200H;
 	Linker.edata_fadr := Linker.debug_fadr + Linker.debug_rawsize;
 	
-	Sys.Seek(out, 400H - 32);
-	Sys.Write8(out, Linker.code_rva); Sys.Write8(out, Linker.debug_rva);
-	Sys.Write8(out, B.modkey[0]); Sys.Write8(out, B.modkey[1]);
+	Rtl.Seek(out, 400H - 32);
+	Rtl.Write8(out, Linker.code_rva); Rtl.Write8(out, Linker.debug_rva);
+	Rtl.Write8(out, B.modkey[0]); Rtl.Write8(out, B.modkey[1]);
 	
 	Write_idata_section; Write_data_section;
 	Write_reloc_section; Write_debug_section; Write_edata_section;
-	Write_PEHeader; Write_code_section; Sys.Close(out);
+	Write_PEHeader; Write_code_section; Rtl.Close(out);
 	
 	(* Rename files *)
 	str[0] := 0X; B.AppendStr(modid, str);
 	IF B.CplFlag.main THEN B.AppendStr('.exe', str)
 	ELSE B.AppendStr('.dll', str)
 	END;
-	Sys.Delete(str); Sys.Rename(tempOutputName, str);
+	Rtl.Delete(str); Rtl.Rename(tempOutputName, str); endTime := Rtl.Time();
 
 	(* Show statistics *)
-	Sys.Console_WriteStr('No errors found.'); Sys.Console_WriteLn;
-	Sys.Console_WriteStr('Code size: ');
-	Sys.Console_WriteInt(Linker.code_size); Sys.Console_WriteLn;
-	Sys.Console_WriteStr('Global variables size: ');
-	Sys.Console_WriteInt(varSize); Sys.Console_WriteLn;
-	Sys.Console_WriteStr('Static data size: ');
-	Sys.Console_WriteInt(staticSize); Sys.Console_WriteLn;
-	Linker.endTime := Sys.GetTickCount();
-	Sys.Console_WriteStr('Compile time: ');
-	Sys.Console_WriteInt((Linker.endTime - Linker.startTime) DIV 10000);
-	Sys.Console_WriteStr(' miliseconds'); Sys.Console_WriteLn;
-	Sys.Console_WriteStr('Created binary file: ');
-	Sys.Console_WriteStr(str); Sys.Console_WriteLn
+	Out.String('No errors found.'); Out.Ln;
+	Out.String('Code size: '); Out.Int(Linker.code_size, 0); Out.Ln;
+	Out.String('Global variables size: '); Out.Int(varSize, 0); Out.Ln;
+	Out.String('Static data size: '); Out.Int(staticSize, 0); Out.Ln;
+	Out.String('Compile time: ');
+	Out.Int(Rtl.TimeToMSecs(endTime - startTime), 0);
+	Out.String(' miliseconds'); Out.Ln;
+	Out.String('Created binary file: '); Out.String(str); Out.Ln
 END Generate;
 
 PROCEDURE Init*(modid0: B.IdStr);
@@ -3188,8 +3190,8 @@ BEGIN
 	LoadLibraryW := -24;
 	GetProcAddress := -16;
 
-	Linker.startTime := Sys.GetTickCount();
-	Sys.Rewrite(out, tempOutputName);
+	startTime := Rtl.Time();
+	Rtl.Rewrite(out, tempOutputName);
 END Init;
 
 BEGIN

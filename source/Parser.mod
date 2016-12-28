@@ -2,7 +2,7 @@ MODULE Parser;
 (*$NEW Rtl.New*)
 
 IMPORT
-	Rtl, Sys := BaseSys, Crypt,
+	Rtl, Out,
 	S := Scanner, B := Base, G := Generator;
 	
 TYPE
@@ -409,8 +409,11 @@ BEGIN GetSym;
 		IF y IS B.Const THEN x := G.OddConst(y)
 		ELSE x := NewNode(S.sfODD, y, NIL); x.type := B.boolType
 		END
-	ELSIF f.id = B.sfLEN THEN y := designator(); Check1(y, {B.tArray});
-		IF y.type.len >= 0 THEN x := B.NewConst(B.intType, y.type.len)
+	ELSIF f.id = B.sfLEN THEN y := designator(); Check1(y, {B.tArray, B.tStr});
+		IF (y.type.form = B.tArray) & (y.type.len >= 0) THEN
+			x := B.NewConst(B.intType, y.type.len)
+		ELSIF y.type.form = B.tStr THEN
+			x := B.NewConst(B.intType, y(B.Str).len)
 		ELSE x := NewNode(S.sfLEN, y, NIL); x.type := B.intType
 		END
 	ELSIF (f.id >= B.sfLSL) & (f.id <= B.sfROR) THEN
@@ -1170,9 +1173,8 @@ BEGIN
 	IF S.errcnt = 0 THEN B.WriteSymfile END;
 	IF S.errcnt = 0 THEN G.Generate(modinit) END;
 	IF S.errcnt = 0 THEN
-		Sys.Console_WriteStr('Created symbol file: ');
-		Sys.Console_WriteStr(modid); Sys.Console_WriteStr('.sym');
-		Sys.Console_WriteLn
+		Out.String('Created symbol file: ');
+		Out.String(modid); Out.String('.sym'); Out.Ln
 	END
 END Module;
 	
