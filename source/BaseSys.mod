@@ -135,6 +135,15 @@ BEGIN
 		0, 0, OPEN_EXISTING, 0, 0
 	)
 END Open;
+
+PROCEDURE OpenReadOnly*(VAR file: File; filename: ARRAY OF CHAR);
+	CONST OPEN_EXISTING = 3;
+BEGIN
+	file.handle := CreateFileW(
+		SYSTEM.ADR(filename), ORD(GENERIC_READ),
+		0, 0, OPEN_EXISTING, 0, 0
+	)
+END OpenReadOnly;
 	
 PROCEDURE Rewrite*(VAR file: File; filename: ARRAY OF CHAR);
 	CONST CREATE_ALWAYS = 2;
