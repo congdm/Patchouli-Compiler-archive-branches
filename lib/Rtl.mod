@@ -1,10 +1,9 @@
-MODULE Rtl;
-
-IMPORT
-	SYSTEM;
+MODULE Rtl; (* multi-threaded application NOT SUPPORTED *)
+IMPORT SYSTEM;
 	
 CONST
 	Kernel32Path = 'KERNEL32.DLL';
+	heapErrMsg = 'Heap corruption';
 	
 TYPE
 	Handle = INTEGER;
@@ -22,6 +21,12 @@ VAR
 	MessageBoxW: PROCEDURE(hWnd, lpText, lpCaption, uType: INTEGER): Int;
 	
 	heapBase, heapSize: INTEGER;
+	fList: ARRAY 9 OF INTEGER;
+	fList0: INTEGER;
+	
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+(* Utility procedures *)
 	
 PROCEDURE ImportExtProc*(
 	VAR proc: ARRAY OF SYSTEM.BYTE;
@@ -48,64 +53,134 @@ PROCEDURE Halt*(msg: ARRAY OF CHAR);
 BEGIN MessageBox('Halt', msg); ExitProcess(0)
 END Halt;
 
+PROCEDURE Assert*(cond: BOOLEAN; msg: ARRAY OF CHAR);
+BEGIN
+	IF ~cond THEN Halt(msg) END
+END Assert;
+
+PROCEDURE FillByte*(ptr, count: INTEGER; val: BYTE);
+BEGIN
+	WHILE count > 0 DO SYSTEM.PUT(ptr, val); INC(ptr); DEC(count) END
+END FillByte;
+
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+(* Heap management *)
+
+PROCEDURE ValidMark(mark: INTEGER): BOOLEAN;
+	RETURN (mark = 0) OR (mark = -1) OR (mark = -2)
+END ValidMark;
+
+PROCEDURE HeapLimit(): INTEGER;
+	RETURN heapBase + heapSize
+END HeapLimit;
+
 PROCEDURE ExtendHeap;
-	VAR p, mark, size: INTEGER;
-BEGIN INC(heapSize, heapSize); p := heapBase;
-	heapBase := HeapReAlloc(GetProcessHeap(), 16, heapBase, heapSize);
+	VAR p, mark, size, prev, p2: INTEGER;
+BEGIN
+	heapBase := HeapReAlloc(GetProcessHeap(), 16, heapBase, heapSize*2);
 	IF heapBase = 0 THEN Halt('Out of memory') END;
-	WHILE p < heapBase + heapSize DIV 2 DO
-		SYSTEM.GET(p, mark); SYSTEM.GET(p+8, size);
-		IF mark = 0 THEN SYSTEM.GET(size, size); INC(size, 16);
-		ELSIF (mark = -1) OR (mark = -2) THEN (* ok *)
-		ELSE Halt('Heap corruption')
-		END;
-		INC(p, size)
+	p := HeapLimit(); SYSTEM.PUT(p+8, heapSize);
+	IF fList0 = 0 THEN fList0 := p
+	ELSE prev := fList0; SYSTEM.GET(fList0, p2);
+		WHILE p2 # 0 DO prev := p2; SYSTEM.GET(p2, p2) END;
+		SYSTEM.PUT(prev, p)
 	END;
-	IF p # heapBase + heapSize DIV 2 THEN Halt('Heap corruption') END;
-	IF mark # -1 THEN SYSTEM.PUT(p, -1); SYSTEM.PUT(p+8, heapSize DIV 2)
-	ELSE DEC(p, size); SYSTEM.PUT(p+8, size + heapSize DIV 2)
-	END
+	heapSize := heapSize*2
 END ExtendHeap;
 
-PROCEDURE FindFree(need: INTEGER): INTEGER;
-	VAR p, mark, size: INTEGER; found: BOOLEAN;
-BEGIN p := heapBase; found := FALSE;
-	WHILE ~found & (p < heapBase+heapSize) DO
-		SYSTEM.GET(p, mark); SYSTEM.GET(p+8, size);
-		IF mark = -1 THEN
-			IF size >= need THEN found := TRUE ELSE INC(p, size) END
-		ELSIF mark = 0 THEN SYSTEM.GET(size, size); INC(p, size+16)
-		ELSIF mark = -2 THEN INC(p, size)
-		ELSE Halt('Heap corruption')
+PROCEDURE Split(p, need: INTEGER);
+	VAR size, i, p2, next: INTEGER;
+BEGIN
+	SYSTEM.GET(p+8, size); SYSTEM.GET(p, next);
+	IF need < size THEN i := (size-need) DIV 64; p2 := p+need;
+		SYSTEM.PUT(p+8, need); SYSTEM.PUT(p2+8, size-need);
+		IF i < LEN(fList) THEN SYSTEM.PUT(p2, fList[i]); fList[i] := p2
+		ELSE SYSTEM.PUT(p2, next); SYSTEM.PUT(p, p2)
+		END
+	END
+END Split;
+
+PROCEDURE Split2(i: INTEGER);
+	VAR p, size, need, p2, next, k: INTEGER;
+BEGIN p := fList0; need := i*64;
+	SYSTEM.GET(p+8, size); SYSTEM.GET(p, next); p2 := p+need;
+	SYSTEM.PUT(p+8, need); SYSTEM.PUT(p2+8, size-need);
+	k := (size-need) DIV 64;
+	IF k >= LEN(fList) THEN fList0 := p2; SYSTEM.PUT(p2, next)
+	ELSE fList0 := next;
+		IF k # i THEN SYSTEM.PUT(p2, fList[k]); fList[k] := p2
+		ELSE SYSTEM.PUT(p2, fList[k]); SYSTEM.PUT(p, p2)
 		END
 	END;
-	IF ~found THEN p := -1 END;
+	fList[i] := p
+END Split2;
+
+PROCEDURE Alloc0(need: INTEGER): INTEGER;
+	VAR p, prev, next, i, k, size: INTEGER;
+BEGIN i := need DIV 64;
+	IF i < 3 THEN p := fList[i];
+		IF p = 0 THEN 
+			IF fList0 = 0 THEN ExtendHeap END; Split2(i); p := fList[i]
+		END;
+		SYSTEM.GET(p, next); fList[i] := next
+	ELSE p := fList0; prev := 0;
+		IF p # 0 THEN SYSTEM.GET(p+8, size) END;
+		WHILE (p # 0) & (size < need) DO
+			prev := p; SYSTEM.GET(p, p);
+			IF p # 0 THEN SYSTEM.GET(p+8, size) END
+		END;
+		IF p # 0 THEN Split(p, need); SYSTEM.GET(p, next);
+			IF prev = 0 THEN fList0 := next ELSE SYSTEM.PUT(prev, next) END
+		ELSE ExtendHeap; p := Alloc0(need)
+		END
+	END;
 	RETURN p
-END FindFree;
-	
+END Alloc0;
+
+PROCEDURE Free0(p: INTEGER);
+	VAR size, i, p2, prev: INTEGER;
+BEGIN
+	SYSTEM.GET(p+8, size); i := size DIV 64 - 1;
+	IF size < 4 THEN SYSTEM.PUT(p, fList[i]); fList[i] := p
+	ELSE p2 := fList[4];
+		IF (p2 = 0) OR (p2 > p) THEN SYSTEM.PUT(p, p2); fList[4] := p
+		ELSE prev := p2; SYSTEM.GET(p2, p2);
+			WHILE (p2 # 0) & (p2 < p) DO prev := p2; SYSTEM.GET(p2, p2) END;
+			SYSTEM.PUT(p, p2); SYSTEM.PUT(prev, p)
+		END
+	END
+END Free0;
+
 PROCEDURE New*(VAR ptr: INTEGER; tdAdr: INTEGER);
-	VAR p, need, mark, bRes: INTEGER;
-BEGIN 
-	SYSTEM.GET(tdAdr, need); need := (need + 31) DIV 16 * 16;
-	REPEAT p := FindFree(need);
-		IF (p = -1) OR (p+need = heapBase+heapSize) THEN ExtendHeap END
-	UNTIL p # -1;
+	VAR p, size, i, off: INTEGER;
+BEGIN
+	SYSTEM.GET(tdAdr, size); size := (size+32+63) DIV 64 * 64;
+	p := Alloc0(size); SYSTEM.PUT(p+24, tdAdr); ptr := p+32; INC(p, 32);
 	
+	i := tdAdr+64; SYSTEM.GET(i, off);
+	WHILE off # -1 DO SYSTEM.PUT(p+off, 0); INC(i, 8); SYSTEM.GET(i, off) END
 END New;
 
-PROCEDURE Alloc*(VAR ptr: INTEGER; size: INTEGER);
-BEGIN
-END Alloc;
+(* -------------------------------------------------------------------------- *)
+(* -------------------------------------------------------------------------- *)
+
+PROCEDURE InitHeap;
+	VAR i: INTEGER;
+BEGIN heapSize := 800000H; 
+	heapBase := HeapAlloc(GetProcessHeap(), 8, heapSize);
+	IF heapBase = 0 THEN Halt('Cannot init heap') END;
+	FOR i := 1 TO LEN(fList)-1 DO fList[i] := 0 END; fList0 := heapBase;
+	SYSTEM.PUT(heapBase, 0); SYSTEM.PUT(heapBase+8, heapSize)
+END InitHeap;
 
 BEGIN
 	ImportExtProc(GetProcessHeap, Kernel32Path, 'GetProcessHeap');
 	ImportExtProc(HeapAlloc, Kernel32Path, 'HeapAlloc');
 	ImportExtProc(HeapFree, Kernel32Path, 'HeapFree');
 	ImportExtProc(HeapReAlloc, Kernel32Path, 'HeapReAlloc');
+	ImportExtProc(ExitProcess, Kernel32Path, 'ExitProcess');
+	ImportExtProc(MessageBoxW, 'USER32.DLL', 'MessageBoxW');
 	
-	heapSize := 80000H;
-	heapBase := HeapAlloc(GetProcessHeap(), 0, heapSize);
-	IF heapBase = 0 THEN Halt('Cannot init memory manager') END;
-	
-	SYSTEM.PUT(heapBase, -1); SYSTEM.PUT(heapBase+8, heapSize)
+	InitHeap
 END Rtl.

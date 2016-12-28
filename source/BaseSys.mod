@@ -1,8 +1,8 @@
 MODULE BaseSys;
-(*$NEW New*)
+(*$NEW Rtl.New*)
 
 IMPORT
-	SYSTEM;
+	SYSTEM, Rtl;
 	
 CONST
 	memFileBlk = 128;
@@ -56,6 +56,7 @@ VAR
 		dwMoveMethod: Dword
 	): Bool;
 	GetTickCount_: PROCEDURE(): Dword;
+	QueryPerformanceCounter: PROCEDURE(lpPerformanceCount: Pointer): Bool;
 	GetCommandLineW: PROCEDURE(): Pointer;
 	WideCharToMultiByte: PROCEDURE(
 		CodePage: Uint;
@@ -412,7 +413,10 @@ END Console_WriteHex;
 (* -------------------------------------------------------------------------- *)
 
 PROCEDURE GetTickCount*(): INTEGER;
-	RETURN GetTickCount_()
+	VAR tick: INTEGER; bRes: Bool;
+BEGIN
+	bRes := QueryPerformanceCounter(SYSTEM.ADR(tick));
+	RETURN tick
 END GetTickCount;
 
 PROCEDURE GetArg*(VAR out: ARRAY OF CHAR; VAR paramLen: INTEGER; n: INTEGER);
@@ -442,10 +446,10 @@ END GetArg;
 
 PROCEDURE New*(VAR ptr: INTEGER; tdAdr: INTEGER);
 	VAR hHeap, size: INTEGER;
-BEGIN
-	hHeap := GetProcessHeap(); SYSTEM.GET(tdAdr, size);
+BEGIN Rtl.New(ptr, tdAdr)
+	(*hHeap := GetProcessHeap(); SYSTEM.GET(tdAdr, size);
 	ptr := HeapAlloc(hHeap, 8, size + 16); ASSERT(ptr # 0);
-	SYSTEM.PUT(ptr+8, tdAdr); INC(ptr, 16)
+	SYSTEM.PUT(ptr+8, tdAdr); INC(ptr, 16)*)
 END New;
 
 (* -------------------------------------------------------------------------- *)
@@ -543,6 +547,7 @@ BEGIN
 	ImportProc(WriteFile, Kernel32, 'WriteFile');
 	ImportProc(SetFilePointerEx, Kernel32, 'SetFilePointerEx');
 	ImportProc(GetTickCount_, Kernel32, 'GetTickCount');
+	ImportProc(QueryPerformanceCounter, Kernel32, 'QueryPerformanceCounter');
 	ImportProc(GetCommandLineW, Kernel32, 'GetCommandLineW');
 	ImportProc(WideCharToMultiByte, Kernel32, 'WideCharToMultiByte');
 	ImportProc(GetStdHandle, Kernel32, 'GetStdHandle');

@@ -3163,7 +3163,7 @@ BEGIN
 	Linker.endTime := Sys.GetTickCount();
 	Sys.Console_WriteStr('Compile time: ');
 	Sys.Console_WriteInt(Linker.endTime - Linker.startTime);
-	Sys.Console_WriteStr(' miliseconds'); Sys.Console_WriteLn;
+	Sys.Console_WriteStr(' ticks'); Sys.Console_WriteLn;
 	Sys.Console_WriteStr('Created binary file: ');
 	Sys.Console_WriteStr(str); Sys.Console_WriteLn
 END Generate;

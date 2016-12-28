@@ -1,3 +1,4 @@
+move /Y Rtl.dll ..\bin\
 move /Y BaseSys.dll ..\bin\
 move /Y Crypt.dll ..\bin\
 move /Y Scanner.dll ..\bin\
