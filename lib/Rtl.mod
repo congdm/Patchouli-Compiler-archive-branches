@@ -66,6 +66,8 @@ END FillByte;
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 (* Heap management *)
+(* The algorithm in here is based on Quick Fit described in *)
+(* http://www.flounder.com/memory_allocation.htm *)
 
 PROCEDURE ValidMark(mark: INTEGER): BOOLEAN;
 	RETURN (mark = 0) OR (mark = -1) OR (mark = -2)
@@ -139,15 +141,25 @@ BEGIN i := need DIV 64;
 END Alloc0;
 
 PROCEDURE Free0(p: INTEGER);
-	VAR size, i, p2, prev: INTEGER;
+	VAR size, i, p2, prev, size0, size2: INTEGER;
 BEGIN
-	SYSTEM.GET(p+8, size); i := size DIV 64 - 1;
-	IF size < 4 THEN SYSTEM.PUT(p, fList[i]); fList[i] := p
-	ELSE p2 := fList[4];
-		IF (p2 = 0) OR (p2 > p) THEN SYSTEM.PUT(p, p2); fList[4] := p
-		ELSE prev := p2; SYSTEM.GET(p2, p2);
+	SYSTEM.GET(p+8, size); i := size DIV 64;
+	IF i < LEN(fList) THEN SYSTEM.PUT(p, fList[i]); fList[i] := p
+	ELSE prev := 0; p2 := fList0;
+		IF (p2 = 0) OR (p2 > p) THEN SYSTEM.PUT(p, p2); fList0 := p
+		ELSE prev := fList0; SYSTEM.GET(p2, p2);
 			WHILE (p2 # 0) & (p2 < p) DO prev := p2; SYSTEM.GET(p2, p2) END;
-			SYSTEM.PUT(p, p2); SYSTEM.PUT(prev, p)
+			SYSTEM.PUT(prev, p); SYSTEM.PUT(p, p2)
+		END;
+		IF (prev # 0) & (prev < p) THEN SYSTEM.GET(prev+8, size0);
+			IF prev+size0 = p THEN
+				INC(size, size0); p := prev;
+				SYSTEM.PUT(p, p2); SYSTEM.PUT(p+8, size)
+			END
+		END;
+		IF (p+size = p2) THEN
+			SYSTEM.GET(p2+8, size2); SYSTEM.GET(p2, p2);
+			SYSTEM.PUT(p, p2); SYSTEM.PUT(p+8, size+size2)
 		END
 	END
 END Free0;
@@ -161,6 +173,38 @@ BEGIN
 	i := tdAdr+64; SYSTEM.GET(i, off);
 	WHILE off # -1 DO SYSTEM.PUT(p+off, 0); INC(i, 8); SYSTEM.GET(i, off) END
 END New;
+
+PROCEDURE Alloc*(VAR ptr: INTEGER; size: INTEGER);
+BEGIN size := (size+32+63) DIV 64 * 64; ptr := Alloc0(size) + 32
+END Alloc;
+
+PROCEDURE Free*(ptr: INTEGER);
+BEGIN Free0(ptr-32)
+END Free;
+
+PROCEDURE ReAlloc*(VAR ptr: INTEGER; nSize: INTEGER);
+	VAR p, p2, size, size2, prev: INTEGER; reloc: BOOLEAN;
+BEGIN
+	nSize := (nSize+32+63) DIV 64 * 64; p := ptr-32; SYSTEM.GET(p+8, size);
+	IF nSize > size THEN
+		p2 := fList0; prev := SYSTEM.ADR(fList0); reloc := FALSE;
+		WHILE (p2 # 0) & (p2 < p) DO prev := p2; SYSTEM.GET(p2, p2) END;
+		IF (p+size = p2) THEN SYSTEM.GET(p2+8, size2);
+			IF size+size2 = nSize THEN
+				SYSTEM.GET(p2, p2); SYSTEM.PUT(p+8, nSize);
+				SYSTEM.PUT(prev, p2)
+			ELSIF size+size2 < nSize THEN reloc := TRUE
+			ELSE SYSTEM.GET(p2, p2); SYSTEM.PUT(p+8, nSize);
+				SYSTEM.PUT(p+nSize, p2); SYSTEM.PUT(prev, p+nSize);
+				SYSTEM.PUT(p+nSize+8, size+size2-nSize)
+			END
+		ELSE reloc := TRUE
+		END;
+		IF reloc THEN p2 := Alloc0(nSize);
+			SYSTEM.COPY(p+32, p2+32, size-32); Free0(p); ptr := p2+32
+		END
+	END
+END ReAlloc;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
