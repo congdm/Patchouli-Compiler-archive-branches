@@ -57,6 +57,7 @@ VAR
 	): Bool;
 	GetTickCount_: PROCEDURE(): Dword;
 	QueryPerformanceCounter: PROCEDURE(lpPerformanceCount: Pointer): Bool;
+	GetSystemTimeAsFileTime: PROCEDURE(lpSystemTimeAsFileTime: Pointer);
 	GetCommandLineW: PROCEDURE(): Pointer;
 	WideCharToMultiByte: PROCEDURE(
 		CodePage: Uint;
@@ -85,6 +86,8 @@ VAR
 		lpMem: Pointer;
 		dwBytes: SizeT
 	): Pointer;
+	
+	cnt: INTEGER;
 	
 PROCEDURE ImportProc(
 	VAR proc: ARRAY OF SYSTEM.BYTE;
@@ -424,7 +427,7 @@ END Console_WriteHex;
 PROCEDURE GetTickCount*(): INTEGER;
 	VAR tick: INTEGER; bRes: Bool;
 BEGIN
-	bRes := QueryPerformanceCounter(SYSTEM.ADR(tick));
+	GetSystemTimeAsFileTime(SYSTEM.ADR(tick));
 	RETURN tick
 END GetTickCount;
 
@@ -452,37 +455,24 @@ END GetArg;
 
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
-
-PROCEDURE New*(VAR ptr: INTEGER; tdAdr: INTEGER);
-	VAR hHeap, size: INTEGER;
-BEGIN Rtl.New(ptr, tdAdr)
-	(*hHeap := GetProcessHeap(); SYSTEM.GET(tdAdr, size);
-	ptr := HeapAlloc(hHeap, 8, size + 16); ASSERT(ptr # 0);
-	SYSTEM.PUT(ptr+8, tdAdr); INC(ptr, 16)*)
-END New;
-
-(* -------------------------------------------------------------------------- *)
-(* -------------------------------------------------------------------------- *)
 (* MemFile *)
 
 PROCEDURE NewMemFile*(VAR f: MemFile);
 	VAR hHeap: Handle;
-BEGIN NEW(f);
-	hHeap := GetProcessHeap(); f.ptr := HeapAlloc(hHeap, 0, memFileBlk);
+BEGIN NEW(f); Rtl.Alloc(f.ptr, memFileBlk);
 	f.maxlen := memFileBlk; f.len := 0
 END NewMemFile;
 
 PROCEDURE DeleteMemFile*(f: MemFile);
 	VAR hHeap: Handle; bRes: Bool;
-BEGIN hHeap := GetProcessHeap(); bRes := HeapFree(hHeap, 0, f.ptr);
-	f.ptr := 0; f.maxlen := 0; f.len := 0
+BEGIN 
+	Rtl.Free(f.ptr); f.ptr := 0; f.maxlen := 0; f.len := 0
 END DeleteMemFile;
 
 PROCEDURE ExtendMemFile(f: MemFile; amount: INTEGER);
 	VAR hHeap: Handle;
 BEGIN amount := amount + (-amount) MOD memFileBlk;
-	hHeap := GetProcessHeap(); INC(f.maxlen, amount);
-	f.ptr := HeapReAlloc(hHeap, 0, f.ptr, f.maxlen)
+	INC(f.maxlen, amount); Rtl.ReAlloc(f.ptr, f.maxlen)
 END ExtendMemFile;
 
 PROCEDURE MergeMemFile*(f1, f2: MemFile);
@@ -546,7 +536,7 @@ END MemFileToDisk;
 (* -------------------------------------------------------------------------- *)
 
 PROCEDURE Init;
-BEGIN
+BEGIN cnt := 0;
 	ImportProc(GetFileAttributesW, Kernel32, 'GetFileAttributesW');
 	ImportProc(CreateFileW, Kernel32, 'CreateFileW');
 	ImportProc(CloseHandle, Kernel32, 'CloseHandle');
@@ -557,6 +547,7 @@ BEGIN
 	ImportProc(SetFilePointerEx, Kernel32, 'SetFilePointerEx');
 	ImportProc(GetTickCount_, Kernel32, 'GetTickCount');
 	ImportProc(QueryPerformanceCounter, Kernel32, 'QueryPerformanceCounter');
+	ImportProc(GetSystemTimeAsFileTime, Kernel32, 'GetSystemTimeAsFileTime');
 	ImportProc(GetCommandLineW, Kernel32, 'GetCommandLineW');
 	ImportProc(WideCharToMultiByte, Kernel32, 'WideCharToMultiByte');
 	ImportProc(GetStdHandle, Kernel32, 'GetStdHandle');

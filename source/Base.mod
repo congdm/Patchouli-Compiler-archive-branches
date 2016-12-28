@@ -1,8 +1,8 @@
 MODULE Base;
-(*$NEW BaseSys.New*)
+(*$NEW Rtl.New*)
 
 IMPORT
-	SYSTEM, Sys := BaseSys, Crypt, S := Scanner;
+	SYSTEM, Rtl, Sys := BaseSys, Crypt, S := Scanner;
 
 CONST
 	MaxExt* = 7; MaxRecTypes* = 512;

@@ -1,8 +1,8 @@
 MODULE Parser;
-(*$NEW BaseSys.New*)
+(*$NEW Rtl.New*)
 
 IMPORT
-	Sys := BaseSys, Crypt,
+	Rtl, Sys := BaseSys, Crypt,
 	S := Scanner, B := Base, G := Generator;
 	
 TYPE

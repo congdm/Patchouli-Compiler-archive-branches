@@ -1,8 +1,8 @@
 MODULE Generator;
-(*$NEW BaseSys.New*)
+(*$NEW Rtl.New*)
 
 IMPORT
-	SYSTEM, Sys := BaseSys,
+	SYSTEM, Rtl, Sys := BaseSys,
 	S := Scanner, B := Base;
 
 CONST
@@ -3162,8 +3162,8 @@ BEGIN
 	Sys.Console_WriteInt(staticSize); Sys.Console_WriteLn;
 	Linker.endTime := Sys.GetTickCount();
 	Sys.Console_WriteStr('Compile time: ');
-	Sys.Console_WriteInt(Linker.endTime - Linker.startTime);
-	Sys.Console_WriteStr(' ticks'); Sys.Console_WriteLn;
+	Sys.Console_WriteInt((Linker.endTime - Linker.startTime) DIV 10000);
+	Sys.Console_WriteStr(' miliseconds'); Sys.Console_WriteLn;
 	Sys.Console_WriteStr('Created binary file: ');
 	Sys.Console_WriteStr(str); Sys.Console_WriteLn
 END Generate;
