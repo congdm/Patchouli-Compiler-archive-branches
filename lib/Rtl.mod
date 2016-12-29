@@ -4,10 +4,11 @@ IMPORT SYSTEM;
 CONST
 	MinInt = 8000000000000000H; MaxInt = 7FFFFFFFFFFFFFFFH;
 
-	Kernel32Path = 'KERNEL32.DLL';
+	Kernel32 = 'KERNEL32.DLL';
 	heapErrMsg = 'Heap corruption';
 	
 	GENERIC_READ = {31}; GENERIC_WRITE = {30};
+	MEM_RESERVE = 2000H; MEM_COMMIT = 1000H; PAGE_READWRITE = 4;
 	
 TYPE
 	Handle = INTEGER;
@@ -27,13 +28,11 @@ VAR
 	GetCommandLineW: PROCEDURE(): Pointer;
 
 	(* Heap *)
-	GetProcessHeap: PROCEDURE(): Handle;
-	HeapAlloc: PROCEDURE(hHeap, dwFlags, dwBytes: INTEGER): Pointer;
-	HeapFree: PROCEDURE(hHeap, dwFlags, lpMem: INTEGER): Bool;
-	HeapReAlloc: PROCEDURE(hHeap, dwFlags, lpMem, dwBytes: INTEGER): Pointer;
+	VirtualAlloc: PROCEDURE(
+		lpAddress, dwSize, flAllocationType, flProtect: INTEGER
+	): Pointer;
 	heapBase, heapSize: INTEGER;
-	fList: ARRAY 9 OF INTEGER;
-	fList0: INTEGER;
+	fList: ARRAY 9 OF INTEGER; fList0: INTEGER;
 	
 	(* File *)
 	GetFileAttributesW: PROCEDURE(lpFileName: INTEGER): Dword;
@@ -191,10 +190,11 @@ END HeapLimit;
 
 PROCEDURE ExtendHeap;
 	VAR p, mark, size, prev, p2: INTEGER;
-BEGIN ASSERT(FALSE);
-	heapBase := HeapReAlloc(GetProcessHeap(), 16, heapBase, heapSize*2);
-	IF heapBase = 0 THEN Halt('Out of memory') END;
-	p := HeapLimit(); SYSTEM.PUT(p+8, heapSize);
+BEGIN
+	IF heapSize = 80000000H THEN Halt('Out of memory') END;
+	p := VirtualAlloc(HeapLimit(), heapSize, MEM_COMMIT, PAGE_READWRITE);
+	IF p = 0 THEN Halt('VirtualAlloc cannot commit') END;
+	SYSTEM.PUT(p+8, heapSize);
 	IF fList0 = 0 THEN fList0 := p
 	ELSE prev := fList0; SYSTEM.GET(fList0, p2);
 		WHILE p2 # 0 DO prev := p2; SYSTEM.GET(p2, p2) END;
@@ -217,7 +217,8 @@ END Split;
 
 PROCEDURE Split2(need: INTEGER): INTEGER;
 	VAR p, size, p2, next, k: INTEGER;
-BEGIN p := fList0;
+BEGIN
+	IF fList0 = 0 THEN ExtendHeap END; p := fList0;
 	SYSTEM.GET(p+8, size); SYSTEM.GET(p, next); p2 := p+need;
 	SYSTEM.PUT(p+8, need); SYSTEM.PUT(p2+8, size-need);
 	k := (size-need) DIV 64;
@@ -518,35 +519,35 @@ END SizeInUtf8;
 
 PROCEDURE InitHeap;
 	VAR i: INTEGER;
-BEGIN heapSize := 800000H; 
-	heapBase := HeapAlloc(GetProcessHeap(), 8, heapSize);
+BEGIN heapSize := 80000H;
+	heapBase := VirtualAlloc(0, 80000000H, MEM_RESERVE, PAGE_READWRITE);
+	IF heapBase = 0 THEN Halt('Cannot init heap') END;
+	heapBase := VirtualAlloc(heapBase, heapSize, MEM_COMMIT, PAGE_READWRITE);
 	IF heapBase = 0 THEN Halt('Cannot init heap') END;
 	FOR i := 1 TO LEN(fList)-1 DO fList[i] := 0 END; fList0 := heapBase;
 	SYSTEM.PUT(heapBase, 0); SYSTEM.PUT(heapBase+8, heapSize)
 END InitHeap;
 
-BEGIN
-	ImportExtProc(ExitProcess, Kernel32Path, 'ExitProcess');
-	ImportExtProc(MessageBoxW, 'USER32.DLL', 'MessageBoxW');
-	ImportExtProc(GetSystemTimeAsFileTime, Kernel32Path, 'GetSystemTimeAsFileTime');
-	ImportExtProc(GetCommandLineW, Kernel32Path, 'GetCommandLineW');
 
-	ImportExtProc(GetProcessHeap, Kernel32Path, 'GetProcessHeap');
-	ImportExtProc(HeapAlloc, Kernel32Path, 'HeapAlloc');
-	ImportExtProc(HeapFree, Kernel32Path, 'HeapFree');
-	ImportExtProc(HeapReAlloc, Kernel32Path, 'HeapReAlloc');
+BEGIN
+	ImportExtProc(ExitProcess, Kernel32, 'ExitProcess');
+	ImportExtProc(MessageBoxW, 'USER32.DLL', 'MessageBoxW');
+	ImportExtProc(GetSystemTimeAsFileTime, Kernel32, 'GetSystemTimeAsFileTime');
+	ImportExtProc(GetCommandLineW, Kernel32, 'GetCommandLineW');
+
+	ImportExtProc(VirtualAlloc, Kernel32, 'VirtualAlloc');
 	
-	ImportExtProc(GetFileAttributesW, Kernel32Path, 'GetFileAttributesW');
-	ImportExtProc(CreateFileW, Kernel32Path, 'CreateFileW');
-	ImportExtProc(CloseHandle, Kernel32Path, 'CloseHandle');
-	ImportExtProc(MoveFileW, Kernel32Path, 'MoveFileW');
-	ImportExtProc(DeleteFileW, Kernel32Path, 'DeleteFileW');
-	ImportExtProc(ReadFile, Kernel32Path, 'ReadFile');
-	ImportExtProc(WriteFile, Kernel32Path, 'WriteFile');
-	ImportExtProc(SetFilePointerEx, Kernel32Path, 'SetFilePointerEx');
+	ImportExtProc(GetFileAttributesW, Kernel32, 'GetFileAttributesW');
+	ImportExtProc(CreateFileW, Kernel32, 'CreateFileW');
+	ImportExtProc(CloseHandle, Kernel32, 'CloseHandle');
+	ImportExtProc(MoveFileW, Kernel32, 'MoveFileW');
+	ImportExtProc(DeleteFileW, Kernel32, 'DeleteFileW');
+	ImportExtProc(ReadFile, Kernel32, 'ReadFile');
+	ImportExtProc(WriteFile, Kernel32, 'WriteFile');
+	ImportExtProc(SetFilePointerEx, Kernel32, 'SetFilePointerEx');
 	
-	ImportExtProc(WideCharToMultiByte, Kernel32Path, 'WideCharToMultiByte');
-	ImportExtProc(MultiByteToWideChar, Kernel32Path, 'MultiByteToWideChar');
+	ImportExtProc(WideCharToMultiByte, Kernel32, 'WideCharToMultiByte');
+	ImportExtProc(MultiByteToWideChar, Kernel32, 'MultiByteToWideChar');
 	
 	InitHeap
 END Rtl.
