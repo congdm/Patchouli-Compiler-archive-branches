@@ -2,7 +2,7 @@ MODULE Base;
 (*$NEW Rtl.New*)
 
 IMPORT
-	SYSTEM, Rtl, Crypt, S := Scanner;
+	SYSTEM, Rtl, Strings, Crypt, S := Scanner;
 
 CONST
 	MaxExt* = 7; MaxRecTypes* = 512;
@@ -152,7 +152,7 @@ END ReadInt;
 (* -------------------------------------------------------------------------- *)
 (* -------------------------------------------------------------------------- *)
 
-PROCEDURE AppendStr*(ext: ARRAY OF CHAR; VAR dst: ARRAY OF CHAR);
+(*PROCEDURE AppendStr*(ext: ARRAY OF CHAR; VAR dst: ARRAY OF CHAR);
 	VAR i, k: INTEGER;
 BEGIN i := 0; WHILE dst[i] # 0X DO INC(i) END;
 	k := 0; WHILE ext[k] # 0X DO dst[i+k] := ext[k]; INC(k) END;
@@ -177,7 +177,7 @@ BEGIN
 	ELSE pos := -1
 	END
 	RETURN pos
-END StrPos;
+END StrPos;*)
 
 PROCEDURE SetCompilerFlag*(pragma: ARRAY OF CHAR);
 	VAR i: INTEGER;
@@ -186,7 +186,7 @@ BEGIN
 	ELSIF pragma = 'CONSOLE' THEN
 		CplFlag.main := TRUE; CplFlag.console := TRUE
 	ELSIF pragma = 'DEBUG' THEN CplFlag.debug := TRUE
-	ELSIF StrPos('NEW ', pragma, 0) = 0 THEN i := 0;
+	ELSIF Strings.Pos('NEW ', pragma, 0) = 0 THEN i := 0;
 		WHILE pragma[i+4] # 0X DO CplFlag.new[i] := pragma[i+4]; INC(i) END
 	END
 END SetCompilerFlag;
@@ -531,7 +531,7 @@ BEGIN
 	Rtl.Close(symfile);
 	
 	IF S.errcnt = 0 THEN filename[0] := 0X;
-		AppendStr(modid, filename); AppendStr('.sym', filename);
+		Strings.Append(modid, filename); Strings.Append('.sym', filename);
 		Rtl.Delete(filename); Rtl.Rename('sym.temp_', filename)
 	ELSE Rtl.Delete('sym.temp_')
 	END
@@ -578,9 +578,9 @@ BEGIN
 		IF module # NIL THEN p := module.types;
 			WHILE (p # NIL) & (p.type.ref # ref) DO p := p.next END;
 			typ := p.type
-		ELSE msg := 'Need to import '; AppendStr(modname, msg);
-			AppendStr(' in order to import ', msg); i := -(curLev+2);
-			AppendStr(modList[i].name, msg); S.Mark(msg)
+		ELSE msg := 'Need to import '; Strings.Append(modname, msg);
+			Strings.Append(' in order to import ', msg); i := -(curLev+2);
+			Strings.Append(modList[i].name, msg); S.Mark(msg)
 		END
 	ELSE ASSERT(FALSE)
 	END
@@ -704,10 +704,11 @@ BEGIN
 				IF name = modid THEN S.Mark('Circular dependency')
 				ELSIF dep # NIL THEN
 					IF (dep.key[0] # depkey[0]) OR (dep.key[1] # depkey[1])
-					THEN msg := 'Module '; AppendStr(name, msg);
-						AppendStr(' was imported by ', msg);
-						AppendStr(module.name, msg);
-						AppendStr(' with a different key', msg); S.Mark(msg)
+					THEN msg := 'Module '; Strings.Append(name, msg);
+						Strings.Append(' was imported by ', msg);
+						Strings.Append(module.name, msg);
+						Strings.Append(' with a different key', msg);
+						S.Mark(msg)
 					END
 				END
 			END;
@@ -721,7 +722,7 @@ END ImportModules;
 PROCEDURE NewModule*(modident: Ident; modname: IdStr);
 	VAR path: String; module: Module;
 BEGIN
-	path[0] := 0X; AppendStr(modname, path); AppendStr('.sym', path);
+	path[0] := 0X; Strings.Append(modname, path); Strings.Append('.sym', path);
 	IF modname = 'SYSTEM' THEN
 		NEW(module); module.name := modname;
 		module.lev := -1; module.first := systemScope.first;

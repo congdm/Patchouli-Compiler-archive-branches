@@ -2,7 +2,7 @@ MODULE Generator;
 (*$NEW Rtl.New*)
 
 IMPORT
-	SYSTEM, Rtl, Out, Sys := BaseSys,
+	SYSTEM, Rtl, Strings, Out, MemFiles,
 	S := Scanner, B := Base;
 
 CONST
@@ -86,7 +86,7 @@ TYPE
 	Block = POINTER TO BlockDesc;
 
 	BlockDesc = RECORD
-		code: Sys.MemFile; rCode: Sys.MemFileRider;
+		code: MemFiles.File; rCode: MemFiles.Rider;
 		jc: BYTE; call, load, finished: BOOLEAN; proc: Proc;
 		no, jmpOff, srcPos: INTEGER; next, link, jDst: Block
 	END;
@@ -114,7 +114,7 @@ VAR
 	pc, sPos, varSize, staticSize, staticBase: INTEGER;
 	modInitProc, trapProc, trapProc2, NEWProc, dllInitProc: Proc;
 	modid: B.IdStr; modidStr, errFmtStr, err2FmtStr: B.Str;
-	err3FmtStr: B.Str; debugData: Sys.MemFile;
+	err3FmtStr: B.Str; debugData: MemFiles.File;
 
 	mem: RECORD
 		mod, rm, bas, idx, scl, disp: INTEGER
@@ -182,7 +182,7 @@ END SmallConst;
 PROCEDURE NewBlock(VAR blk: Block);
 BEGIN NEW(blk); blk.no := 0; blk.jc := 255; blk.jmpOff := 0;
 	blk.call := FALSE; blk.load := FALSE; blk.finished := TRUE;
-	Sys.NewMemFile(blk.code); Sys.SetMemFile(blk.rCode, blk.code, 0);
+	MemFiles.New(blk.code); MemFiles.Set(blk.rCode, blk.code, 0);
 END NewBlock;
 
 PROCEDURE CloseBlock0;
@@ -212,7 +212,7 @@ END CloseBlock2;
 
 PROCEDURE Put1(n: INTEGER);
 BEGIN
-	Sys.WriteMemFile(curBlk.rCode, n)
+	MemFiles.Write(curBlk.rCode, n)
 END Put1;
 
 PROCEDURE Put2(n: INTEGER);
@@ -228,16 +228,16 @@ BEGIN Put4(n); n := n DIV 100000000H; Put4(n)
 END Put8;
 
 PROCEDURE CodeLen(): INTEGER;
-	RETURN Sys.MemFileLength(curBlk.code)
+	RETURN MemFiles.Length(curBlk.code)
 END CodeLen;
 
 PROCEDURE CodeLen0(blk: Block): INTEGER;
-	RETURN Sys.MemFileLength(blk.code)
+	RETURN MemFiles.Length(blk.code)
 END CodeLen0;
 
 PROCEDURE CodeLen1(blk: Block): INTEGER;
 	VAR res: INTEGER;
-BEGIN res := Sys.MemFileLength(blk.code);
+BEGIN res := MemFiles.Length(blk.code);
 	IF ~blk.finished THEN
 		IF blk.load THEN INC(res, 7)
 		ELSIF blk.call THEN INC(res, 5)
@@ -249,15 +249,15 @@ BEGIN res := Sys.MemFileLength(blk.code);
 END CodeLen1;
 
 PROCEDURE SetCodePos(pos: INTEGER);
-BEGIN Sys.SetMemFile(curBlk.rCode, curBlk.code, pos)
+BEGIN MemFiles.Set(curBlk.rCode, curBlk.code, pos)
 END SetCodePos;
 
 PROCEDURE MergeNextBlock(blk: Block);
 	VAR next: Block;
 BEGIN ASSERT(blk.finished); ASSERT(blk.next.finished);
 	next := blk.next; blk.next := next.next;
-	Sys.MergeMemFile(blk.code, next.code);
-	Sys.SetMemFile(blk.rCode, blk.code, CodeLen0(blk));
+	MemFiles.Merge(blk.code, next.code);
+	MemFiles.Set(blk.rCode, blk.code, CodeLen0(blk));
 	IF blk.next = NIL THEN curBlk := blk END
 END MergeNextBlock;
 
@@ -2070,14 +2070,14 @@ BEGIN
 END MakeItem;
 
 PROCEDURE Debug(endBlk: Block);
-	VAR file: Rtl.File; b: BYTE; rider: Sys.MemFileRider; blk: Block;
+	VAR file: Rtl.File; b: BYTE; rider: MemFiles.Rider; blk: Block;
 		i: INTEGER;
 BEGIN
 	Rtl.Rewrite(file, 'Test.dat');
 	blk := curProc.blk;
 	WHILE blk # endBlk DO
-		Sys.SetMemFile(rider, blk.code, 0);
-		REPEAT Sys.ReadMemFile(rider, b);
+		MemFiles.Set(rider, blk.code, 0);
+		REPEAT MemFiles.Read(rider, b);
 			IF ~rider.eof THEN Rtl.Write1(file, b) END
 		UNTIL rider.eof;
 		IF ~blk.finished THEN i := 0;
@@ -2538,7 +2538,7 @@ END DLLInit;
 PROCEDURE MergeAllProcedure;
 	CONST limit = 40000000H;
 	VAR proc: Proc; blk, src, dst: Block; off: INTEGER;
-		totalCodeLen, x, p: INTEGER; r: Sys.MemFileRider;
+		totalCodeLen, x, p: INTEGER; r: MemFiles.Rider;
 BEGIN proc := procList;
 	WHILE proc # NIL DO blk := proc.blk; blk.proc := proc;
 		WHILE blk.next # NIL DO
@@ -2549,7 +2549,7 @@ BEGIN proc := procList;
 		END;
 		proc := proc.next
 	END;
-	Sys.NewMemFile(debugData); Sys.SetMemFile(r, debugData, 0);
+	MemFiles.New(debugData); MemFiles.Set(r, debugData, 0);
 	src := procList.blk; totalCodeLen := 0;
 	WHILE src # NIL DO
 		IF ~src.finished THEN dst := src.jDst; off := 0;
@@ -2564,7 +2564,7 @@ BEGIN proc := procList;
 					IF src.jDst = trapProc.blk THEN ASSERT(src.jc < 16);
 						x := totalCodeLen + CodeLen(); ASSERT(x < limit);
 						p := src.srcPos; ASSERT(p < limit); INC(x, LSL(p, 30));
-						INC(x, LSL(src.jc, 60)); Sys.WriteMemFile8(r, x)
+						INC(x, LSL(src.jc, 60)); MemFiles.Write8(r, x)
 					END
 				ELSE SetRm_RIP(off); EmitRegRm(LEA, src.jc, 8)
 				END
@@ -2902,9 +2902,9 @@ PROCEDURE Write_edata_section;
 	CONST dirsize = 40;
 	VAR ident: B.Ident; x: B.Object; name: B.String;
 		namesize, tablesize, i, rva, expno: INTEGER;
-BEGIN name[0] := 0X; B.AppendStr(modid, name); namesize := 0;
-	IF B.CplFlag.main THEN B.AppendStr('.exe', name)
-	ELSE B.AppendStr('.dll', name)
+BEGIN name[0] := 0X; Strings.Append(modid, name); namesize := 0;
+	IF B.CplFlag.main THEN Strings.Append('.exe', name)
+	ELSE Strings.Append('.dll', name)
 	END;
 	WHILE name[namesize] # 0X DO INC(namesize) END; INC(namesize);
 	expno := B.expno; tablesize := expno * 4;
@@ -3079,16 +3079,16 @@ BEGIN
 END Write_PEHeader;
 
 PROCEDURE Write_code_section;
-	VAR b: BYTE; rider: Sys.MemFileRider; blk: Block;
+	VAR b: BYTE; blk: Block;
 BEGIN
 	Rtl.Seek(out, 400H); blk := procList.blk;
-	Sys.MemFileToDisk(blk.code, out); ASSERT(blk.next = NIL)
+	MemFiles.ToDisk(blk.code, out); ASSERT(blk.next = NIL)
 END Write_code_section;
 
 PROCEDURE Write_debug_section;
 BEGIN
 	Rtl.Seek(out, Linker.debug_fadr);
-	Sys.MemFileToDisk(debugData, out)
+	MemFiles.ToDisk(debugData, out)
 END Write_debug_section;
 
 PROCEDURE Generate*(modinit: B.Node);
@@ -3124,7 +3124,7 @@ BEGIN
 	
 	Linker.bss_size := varSize; Align(Linker.bss_size, 4096);
 	
-	Linker.debug_size := Sys.MemFileLength(debugData);
+	Linker.debug_size := MemFiles.Length(debugData);
 	Linker.debug_rawsize := (Linker.debug_size + 511) DIV 512 * 512;
 	
 	Linker.bss_rva := 1000H;
@@ -3153,9 +3153,9 @@ BEGIN
 	Write_PEHeader; Write_code_section; Rtl.Close(out);
 	
 	(* Rename files *)
-	str[0] := 0X; B.AppendStr(modid, str);
-	IF B.CplFlag.main THEN B.AppendStr('.exe', str)
-	ELSE B.AppendStr('.dll', str)
+	str[0] := 0X; Strings.Append(modid, str);
+	IF B.CplFlag.main THEN Strings.Append('.exe', str)
+	ELSE Strings.Append('.dll', str)
 	END;
 	Rtl.Delete(str); Rtl.Rename(tempOutputName, str); endTime := Rtl.Time();
 

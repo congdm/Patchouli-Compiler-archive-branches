@@ -1,76 +1,90 @@
 MODULE MemFiles;
 (*$NEW Rtl.New*)
 IMPORT SYSTEM, Rtl;
-
+	
 CONST
-	blkUnit = 64;
-	MEM_RESERVE = 2000H; MEM_COMMIT = 1000H; PAGE_READWRITE = 4;
-
+	memFileBlk = 64;
+	
 TYPE
-	Block* = POINTER TO RECORD
-		pos, size, adr: INTEGER; next: Block
-	END;
-	File* = POINTER TO RECORD
-		first, last: Block; len: INTEGER
-	END;
-	Rider* = RECORD
-		f: File; cur: Block; pos: INTEGER; eof*: BOOLEAN
-	END;
-	
-VAR
-	VirtualAlloc: PROCEDURE(
-		lpAddress, dwSize, flAllocationType, flProtect: INTEGER
-	): INTEGER;
-	sAdr, eAdr, cAdr: INTEGER;
-	
-PROCEDURE AllocPage;
-BEGIN
-	IF eAdr-sAdr < 80000000H THEN
-		eAdr := VirtualAlloc(eAdr, 1000H, MEM_COMMIT, PAGE_READWRITE);
-		INC(eAdr, 1000H)
-	ELSE ASSERT(FALSE)
-	END
-END AllocPage;
-	
-PROCEDURE NewBlock(f: File);
-	VAR blk: Block;
-BEGIN
-	NEW(blk); blk.size := blkUnit; blk.adr := cAdr;
-	INC(cAdr, blkUnit); IF cAdr > eAdr THEN AllocPage END;
-	IF f.last # NIL THEN
-		blk.pos := f.last.pos + f.last.size;
-		f.last.next := blk; f.last := blk
-	ELSE f.first := blk; f.last := blk; blk.pos := 0
-	END;
-END NewBlock;
-	
+	Pointer = INTEGER;
+	File* = POINTER TO RECORD ptr: Pointer; len, maxlen: INTEGER END;
+	Rider* = RECORD f: File; pos: INTEGER; eof*: BOOLEAN END;
+		
 PROCEDURE New*(VAR f: File);
 BEGIN
-	NEW(f); f.len := 0; NewBlock(f)
+	NEW(f); Rtl.Alloc(f.ptr, memFileBlk);
+	f.maxlen := memFileBlk; f.len := 0
 END New;
 
+PROCEDURE Delete*(f: File);
+BEGIN 
+	Rtl.Free(f.ptr); f.ptr := 0; f.maxlen := 0; f.len := 0
+END Delete;
+
+PROCEDURE Extend(f: File; amount: INTEGER);
+BEGIN
+	amount := amount + (-amount) MOD memFileBlk;
+	INC(f.maxlen, amount); Rtl.ReAlloc(f.ptr, f.maxlen)
+END Extend;
+
+PROCEDURE Merge*(f1, f2: File);
+	VAR newLen: INTEGER;
+BEGIN
+	IF f1.maxlen < f1.len + f2.len THEN
+		newLen := f1.len + f2.len;
+		newLen := newLen + (-newLen) MOD memFileBlk;
+		Extend(f1, newLen - f1.maxlen)
+	END;
+	SYSTEM.COPY(f2.ptr, f1.ptr + f1.len, f2.len);
+	INC(f1.len, f2.len); Delete(f2)
+END Merge;
+
+PROCEDURE Length*(f: File): INTEGER;
+	RETURN f.len
+END Length;
+
 PROCEDURE Set*(VAR r: Rider; f: File; pos: INTEGER);
-	VAR b: Block;
-BEGIN r.f := f; b := f.first;
-	IF pos >= f.len THEN pos := f.len; r.eof := TRUE ELSE r.eof := FALSE END;
-	WHILE (pos < b.pos) OR (pos > b.pos + b.size) DO b := b.next END;
-	IF pos = b.pos + b.size THEN b := 
-		r.pos := pos; r.cur := b; r.eof := FALSE
-	ELSE r.pos := f.len; r.eof := TRUE; r.cur := f.last
+BEGIN
+	r.f := f; r.eof := FALSE;
+	IF pos >= 0 THEN
+		IF pos <= f.len THEN r.pos := pos ELSE r.pos := f.len END
+	ELSE r.pos := 0
 	END
 END Set;
 
 PROCEDURE Write*(VAR r: Rider; x: BYTE);
-	VAR b: Block; pos: INTEGER;
-BEGIN pos := r.pos; b := r.cur;
-	SYSTEM.PUT(SYSTEM.ADR(r.cache) + pos DIV 8 * 8, x); INC(pos);
-	IF pos MOD 8 = 0 THEN
-		SYSTEM.PUT(b.adr + (pos-b.pos) DIV 8 * 8, r.cache);
-		IF pos = b.pos + b.size THEN Extend(r.f) END;
-		SYSTEM.GET(	
-	
+BEGIN
+	IF r.pos <= r.f.len THEN
+		IF r.pos+1 > r.f.maxlen THEN Extend(r.f, memFileBlk) END;
+		SYSTEM.PUT(r.f.ptr + r.pos, x); INC(r.pos);
+		IF r.pos > r.f.len THEN r.f.len := r.pos END
+	ELSE r.eof := TRUE
+	END
 END Write;
 
+PROCEDURE Write8*(VAR r: Rider; x: INTEGER);
 BEGIN
+	IF r.pos <= r.f.len THEN
+		IF r.pos+8 > r.f.maxlen THEN Extend(r.f, memFileBlk) END;
+		SYSTEM.PUT(r.f.ptr + r.pos, x); INC(r.pos, 8);
+		IF r.pos > r.f.len THEN r.f.len := r.pos END
+	ELSE r.eof := TRUE
+	END
+END Write8;
+
+PROCEDURE Read*(VAR r: Rider; VAR x: BYTE);
+BEGIN
+	IF r.pos < r.f.len THEN
+		SYSTEM.GET(r.f.ptr + r.pos, x); INC(r.pos)
+	ELSE r.eof := TRUE
+	END
+END Read;
+
+PROCEDURE ToDisk*(mf: File; f: Rtl.File);
+	VAR byteWritten: INTEGER;
+BEGIN
+	byteWritten := mf.len;
+	Rtl.WriteBuf(f, mf.ptr, byteWritten) 
+END ToDisk;
 
 END MemFiles.
